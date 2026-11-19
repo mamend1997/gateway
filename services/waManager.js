@@ -125,9 +125,16 @@ export class WhatsAppManager extends EventEmitter {
 
   async rotateDeviceToken(id) {
     if (!this.devices.has(id)) return null;
+    const previousToken = this.deviceTokens.get(id);
     const token = randomBytes(32).toString('hex');
     this.deviceTokens.set(id, token);
-    await this.persistTokens();
+    try {
+      await this.persistTokens();
+    } catch (error) {
+      if (previousToken) this.deviceTokens.set(id, previousToken);
+      else this.deviceTokens.delete(id);
+      throw error;
+    }
     return token;
   }
 

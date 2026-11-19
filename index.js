@@ -54,6 +54,7 @@ const waManager = new WhatsAppManager({
 });
 const queue = new QueueManager({
   waManager,
+  dataDir,
   minDelayMs,
   maxDelayMs,
   maxRetries,
@@ -65,6 +66,8 @@ app.use('/api', createApiRouter({ apiKey, queue, waManager, scheduler, autoReply
 app.get('/', (_request, response) => {
   response.sendFile(path.join(currentDir, 'public', 'index.html'));
 });
+
+await queue.start();
 
 const server = app.listen(port, '0.0.0.0', () => {
   console.log(`WhatsApp Gateway berjalan di http://0.0.0.0:${port}`);
@@ -84,7 +87,7 @@ async function shutdown(signal) {
   isShuttingDown = true;
   console.log(`Menerima ${signal}; menutup aplikasi...`);
   await scheduler.stop();
-  queue.stop();
+  await queue.stop();
   await new Promise((resolve) => server.close(resolve));
   await waManager.stop();
   process.exit(0);

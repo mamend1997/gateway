@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import { AutoReplyService } from '../services/autoReply.js';
+import { MessageHistoryStore } from '../services/historyStore.js';
 import { MessageScheduler } from '../services/scheduler.js';
 import { WhatsAppManager } from '../services/waManager.js';
 
@@ -81,6 +82,47 @@ test('rotating a device token persists the new secret and invalidates the old on
     assert.equal(savedTokens['device-1'], token);
     assert.equal(manager.getDeviceIdForToken(token), 'device-1');
     assert.equal(manager.getDeviceIdForToken('a'.repeat(64)), null);
+  } finally {
+    await fs.rm(dataDir, { recursive: true, force: true });
+  }
+});
+
+test('message history survives restart and marks in-flight sends as interrupted', async () => {
+  const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'gateway-history-'));
+  try {
+    const history = new MessageHistoryStore({ dataDir });
+    await history.start();
+    history.upsert({
+      id: 'sent-1',
+      phone: '6281234567890',
+      deviceId: 'primary',
+      preview: 'OTP terkirim',
+      status: 'sent',
+      attempts: 1,
+      createdAt: '2026-11-20T00:00:00.000Z',
+      updatedAt: '2026-11-20T00:00:01.000Z',
+      error: null,
+    });
+    history.upsert({
+      id: 'queued-1',
+      phone: '6285712345678',
+      deviceId: 'primary',
+      preview: 'OTP antre',
+      status: 'sending',
+      attempts: 1,
+      createdAt: '2026-11-20T00:00:02.000Z',
+      updatedAt: '2026-11-20T00:00:03.000Z',
+      error: null,
+    });
+    await history.persist();
+
+    const restarted = new MessageHistoryStore({ dataDir });
+    await restarted.start();
+    const messages = restarted.getMessages();
+
+    assert.equal(messages.find((item) => item.id === 'sent-1').status, 'sent');
+    assert.equal(messages.find((item) => item.id === 'queued-1').status, 'failed');
+    assert.match(messages.find((item) => item.id === 'queued-1').error, /dimulai ulang/);
   } finally {
     await fs.rm(dataDir, { recursive: true, force: true });
   }

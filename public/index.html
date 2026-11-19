@@ -116,6 +116,10 @@
       .api-row { display: flex; gap: 9px; }
       .api-row input { flex: 1; }
       .hidden { display: none !important; }
+      .toast-region { position: fixed; top: 18px; right: 18px; z-index: 20; display: grid; width: min(390px, calc(100vw - 36px)); gap: 9px; }
+      .toast { padding: 13px 15px; border: 1px solid #cbd5e1; border-radius: 12px; color: #23344b; background: white; box-shadow: 0 12px 30px #17233826; font-size: .88rem; }
+      .toast.success { border-color: #9ce0b7; color: #12643a; background: #effcf4; }
+      .toast.error { border-color: #f0b5b0; color: #9f2520; background: #fff3f1; }
       @media (max-width: 980px) {
         .sidebar { width: 220px; }
         .main { width: calc(100% - 220px); margin-left: 220px; }
@@ -138,6 +142,7 @@
     </style>
   </head>
   <body>
+    <div id="toastRegion" class="toast-region" aria-live="polite" aria-atomic="false"></div>
     <div class="app">
       <aside class="sidebar">
         <div class="brand"><span class="brand-mark">W</span><span class="brand-name">Gateway</span></div>
@@ -341,6 +346,14 @@
         node.className = `feedback ${kind}`;
       }
 
+      function notify(message, kind = '') {
+        const toast = document.createElement('div');
+        toast.className = `toast ${kind}`;
+        toast.textContent = message;
+        $('#toastRegion').append(toast);
+        window.setTimeout(() => toast.remove(), 5000);
+      }
+
       async function api(url, options = {}) {
         const key = apiKeyInput.value.trim();
         if (!key) throw new Error('Masukkan API key pada Pengaturan terlebih dahulu.');
@@ -361,7 +374,7 @@
         if (name === 'history') loadHistory();
         if (name === 'schedules') loadSchedules();
         if (name === 'autoreply') loadRules();
-        if (name === 'devices') loadDevices();
+        if (name === 'devices') loadDevices().catch((error) => notify(error.message, 'error'));
       }
 
       function setStatus(status) {
@@ -410,7 +423,10 @@
         renderDeviceSelects();
         const rows = $('#deviceRows');
         rows.replaceChildren();
-        if (!devices.length) emptyRow(rows, 3, 'Belum ada device.');
+        if (!devices.length) {
+          emptyRow(rows, 3, 'Belum ada device.');
+          notify('Belum ada device WhatsApp yang terdaftar.', 'error');
+        }
         for (const device of devices) {
           const row = rows.insertRow();
           const identity = row.insertCell();
@@ -465,20 +481,33 @@
       }
 
       async function selectDevice(id) {
-        $('#deviceSelect').value = id;
-        localStorage.setItem('gateway-device', id);
-        await refreshStatus();
-        if (activeSource === 'contacts' || activeSource === 'groups') await loadDirectory();
+        const device = devices.find((item) => item.id === id);
+        if (!device) return notify('Informasi device tidak ditemukan. Muat ulang halaman Devices.', 'error');
+        try {
+          $('#deviceSelect').value = id;
+          localStorage.setItem('gateway-device', id);
+          const status = await refreshStatus();
+          if (activeSource === 'contacts' || activeSource === 'groups') await loadDirectory();
+          notify(`${device.name} dipilih. Status koneksi: ${status.status}.`, status.connected ? 'success' : '');
+        } catch (error) {
+          notify(error.message, 'error');
+        }
       }
 
       async function changeDeviceConnection(device) {
         try {
           const action = device.connected ? 'disconnect' : 'reconnect';
-          await api(`/api/devices/${encodeURIComponent(device.id)}/${action}`, { method: 'POST' });
-          setFeedback($('#deviceFeedback'), device.connected ? 'Device diputuskan.' : 'Permintaan sambung ulang dikirim.', 'success');
+          const result = await api(`/api/devices/${encodeURIComponent(device.id)}/${action}`, { method: 'POST' });
+          const status = result.status?.status ?? 'connecting';
+          const message = device.connected
+            ? `${device.name} diputuskan.`
+            : `Permintaan sambung ulang untuk ${device.name} dikirim. Status: ${status}.`;
+          setFeedback($('#deviceFeedback'), message, 'success');
+          notify(message, 'success');
           await loadDevices();
         } catch (error) {
           setFeedback($('#deviceFeedback'), error.message, 'error');
+          notify(error.message, 'error');
         }
       }
 
@@ -488,7 +517,8 @@
           if (navigator.clipboard?.writeText && window.isSecureContext) {
             try {
               await navigator.clipboard.writeText(token);
-              setFeedback($('#deviceFeedback'), 'Token device disalin. Simpan token dengan aman.', 'success');
+              setFeedback($('#deviceFeedback'), `Token ${id} disalin. Simpan token dengan aman.`, 'success');
+              notify(`Token untuk device ${id} berhasil disalin.`, 'success');
               return;
             } catch {
               // Clipboard access may be blocked; show the token for manual copying.
@@ -496,8 +526,10 @@
           }
           const copied = window.prompt('Salin token device ini:', token) !== null;
           setFeedback($('#deviceFeedback'), copied ? 'Token ditampilkan untuk disalin.' : 'Penyalinan token dibatalkan.', copied ? 'success' : 'error');
+          notify(copied ? `Token untuk device ${id} ditampilkan.` : 'Penyalinan token dibatalkan.', copied ? 'success' : 'error');
         } catch (error) {
           setFeedback($('#deviceFeedback'), error.message, 'error');
+          notify(error.message, 'error');
         }
       }
 
@@ -506,14 +538,17 @@
         try {
           const { token } = await api(`/api/devices/${encodeURIComponent(id)}/token/rotate`, { method: 'POST' });
           await copyDeviceToken(id, token);
+          notify('Token lama sudah tidak berlaku. Salin token baru lalu perbarui aplikasi eksternal.', 'success');
         } catch (error) {
           setFeedback($('#deviceFeedback'), error.message, 'error');
+          notify(error.message, 'error');
         }
       }
 
       async function editDevice(device) {
         const name = window.prompt('Nama device:', device.name);
-        if (name === null || !name.trim()) return;
+        if (name === null) return;
+        if (!name.trim()) return notify('Nama device tidak boleh kosong.', 'error');
         try {
           await api(`/api/devices/${encodeURIComponent(device.id)}`, {
             method: 'PATCH',
@@ -521,14 +556,17 @@
           });
           await loadDevices();
           setFeedback($('#deviceFeedback'), 'Nama device diperbarui.', 'success');
+          notify(`Nama device diperbarui menjadi "${name.trim()}".`, 'success');
         } catch (error) {
           setFeedback($('#deviceFeedback'), error.message, 'error');
+          notify(error.message, 'error');
         }
       }
 
       async function refreshStatus() {
         const status = await api(`/api/status?deviceId=${encodeURIComponent(selectedDeviceId())}`);
         setStatus(status);
+        return status;
       }
 
       async function refreshAll() {
@@ -783,13 +821,17 @@
       }
 
       async function removeDevice(id) {
+        const device = devices.find((item) => item.id === id);
+        if (!device) return notify('Informasi device tidak ditemukan.', 'error');
         if (!confirm('Hapus device ini beserta sesi dan token per-device-nya?')) return;
         try {
           await api(`/api/devices/${encodeURIComponent(id)}`, { method: 'DELETE' });
           await loadDevices();
           setFeedback($('#deviceFeedback'), 'Device dihapus.', 'success');
+          notify(`${device.name}, sesi, dan tokennya berhasil dihapus.`, 'success');
         } catch (error) {
           setFeedback($('#deviceFeedback'), error.message, 'error');
+          notify(error.message, 'error');
         }
       }
 

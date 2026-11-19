@@ -1,13 +1,15 @@
 import { randomUUID } from 'node:crypto';
+import { MessageHistoryStore } from './historyStore.js';
 
 const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
 export class MessageQueue {
-  constructor({ waClient, minDelayMs, maxDelayMs, maxRetries }) {
+  constructor({ waClient, minDelayMs, maxDelayMs, maxRetries, onChange }) {
     this.waClient = waClient;
     this.minDelayMs = minDelayMs;
     this.maxDelayMs = maxDelayMs;
     this.maxRetries = maxRetries;
+    this.onChange = onChange;
     this.messages = [];
     this.pending = [];
     this.stopped = false;
@@ -34,6 +36,7 @@ export class MessageQueue {
     this.messages.unshift(item);
     this.messages = this.messages.slice(0, 500);
     this.pending.push(item);
+    this.onChange?.(this.toPublicMessage(item));
     void this.process();
     return this.toPublicMessage(item);
   }
@@ -65,16 +68,20 @@ export class MessageQueue {
 
         item.status = 'sending';
         item.updatedAt = new Date().toISOString();
+        this.onChange?.(this.toPublicMessage(item));
         let finished = false;
 
         while (!finished && !this.stopped) {
           item.attempts += 1;
+          item.updatedAt = new Date().toISOString();
+          this.onChange?.(this.toPublicMessage(item));
           try {
             await this.waClient.sendMessage(item.phone, item.message, item.attachment);
             item.status = 'sent';
             item.error = null;
             item.attachment = null;
             item.updatedAt = new Date().toISOString();
+            this.onChange?.(this.toPublicMessage(item));
             finished = true;
           } catch (error) {
             item.error = error.message || 'Pengiriman gagal.';
@@ -87,6 +94,7 @@ export class MessageQueue {
               item.status = 'queued';
               await sleep(1000 * item.attempts);
             }
+            this.onChange?.(this.toPublicMessage(item));
           }
         }
       }
@@ -107,22 +115,33 @@ export class MessageQueue {
 }
 
 export class QueueManager {
-  constructor({ waManager, minDelayMs, maxDelayMs, maxRetries }) {
+  constructor({ waManager, dataDir, minDelayMs, maxDelayMs, maxRetries }) {
     this.waManager = waManager;
     this.options = { minDelayMs, maxDelayMs, maxRetries };
     this.queues = new Map();
     this.stopped = false;
+    this.history = new MessageHistoryStore({ dataDir });
+    this.pendingPersist = Promise.resolve();
+    this.persistTimer = null;
     this.waManager.on('deviceRemoved', (deviceId) => {
       this.queues.get(deviceId)?.stop();
       this.queues.delete(deviceId);
     });
   }
 
+  async start() {
+    await this.history.start();
+  }
+
   getQueue(deviceId = 'primary') {
     const client = this.waManager.getClient(deviceId);
     if (!client) throw new Error('Device pengirim tidak ditemukan.');
     if (!this.queues.has(deviceId)) {
-      this.queues.set(deviceId, new MessageQueue({ ...this.options, waClient: client }));
+      this.queues.set(deviceId, new MessageQueue({
+        ...this.options,
+        waClient: client,
+        onChange: (item) => this.record(item),
+      }));
     }
     return this.queues.get(deviceId);
   }
@@ -133,13 +152,35 @@ export class QueueManager {
   }
 
   getMessages() {
-    return [...this.queues.values()]
-      .flatMap((queue) => queue.getMessages())
-      .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+    return this.history.getMessages();
   }
 
-  stop() {
+  record(item) {
+    this.history.upsert(item);
+    if (this.persistTimer) return;
+    this.persistTimer = setTimeout(() => {
+      this.persistTimer = null;
+      this.persistNow();
+    }, 250);
+    this.persistTimer.unref();
+  }
+
+  persistNow() {
+    const snapshot = this.history.getMessages();
+    this.pendingPersist = this.pendingPersist
+      .catch(() => {})
+      .then(() => this.history.persistSnapshot(snapshot))
+      .catch((error) => {
+        console.error('Gagal menyimpan riwayat pesan:', error);
+      });
+    return this.pendingPersist;
+  }
+
+  async stop() {
     this.stopped = true;
     for (const queue of this.queues.values()) queue.stop();
+    if (this.persistTimer) clearTimeout(this.persistTimer);
+    this.persistTimer = null;
+    await this.persistNow();
   }
 }
