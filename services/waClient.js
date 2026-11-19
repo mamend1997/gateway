@@ -3,10 +3,13 @@ import { EventEmitter } from 'node:events';
 import makeWASocket, { DisconnectReason, useMultiFileAuthState } from '@whiskeysockets/baileys';
 import pino from 'pino';
 import QRCode from 'qrcode';
+import { normalizePhone } from './phone.js';
 
 export class WhatsAppClient extends EventEmitter {
-  constructor({ authDir, adminPhone }) {
+  constructor({ id, name, authDir, adminPhone }) {
     super();
+    this.id = id;
+    this.name = name;
     this.authDir = authDir;
     this.adminPhone = adminPhone?.trim();
     this.socket = null;
@@ -18,6 +21,7 @@ export class WhatsAppClient extends EventEmitter {
     this.stopped = false;
     this.wasConnected = false;
     this.disconnectNotice = null;
+    this.contacts = new Map();
     this.logger = pino({ level: process.env.LOG_LEVEL ?? 'warn' });
   }
 
@@ -49,6 +53,34 @@ export class WhatsAppClient extends EventEmitter {
     });
     this.socket = socket;
     socket.ev.on('creds.update', saveCreds);
+    socket.ev.on('contacts.upsert', (contacts) => {
+      for (const contact of contacts) {
+        if (contact.id) this.contacts.set(contact.id, contact);
+      }
+      this.emit('contacts', this.getContacts());
+    });
+    socket.ev.on('messaging-history.set', ({ contacts = [] }) => {
+      for (const contact of contacts) {
+        if (contact.id) this.contacts.set(contact.id, contact);
+      }
+      this.emit('contacts', this.getContacts());
+    });
+    socket.ev.on('contacts.update', (contacts) => {
+      for (const contact of contacts) {
+        if (contact.id) this.contacts.set(contact.id, {
+          ...this.contacts.get(contact.id),
+          ...contact,
+        });
+      }
+      this.emit('contacts', this.getContacts());
+    });
+    socket.ev.on('messages.upsert', ({ type, messages }) => {
+      if (type !== 'notify') return;
+      for (const message of messages) {
+        if (message.key?.fromMe || !message.key?.remoteJid) continue;
+        this.emit('message', message);
+      }
+    });
     socket.ev.on('connection.update', async (update) => {
       if (this.socket !== socket) return;
       if (update.qr) {
@@ -107,19 +139,66 @@ export class WhatsAppClient extends EventEmitter {
   }
 
   async sendText(phone, message) {
+    return this.sendMessage(phone, message);
+  }
+
+  async sendMessage(target, message, attachment) {
     if (!this.isConnected() || !this.socket) {
       const error = new Error('WhatsApp belum terhubung.');
       error.permanent = false;
       throw error;
     }
 
-    const [result] = await this.socket.onWhatsApp(phone);
-    if (!result?.exists) {
-      const error = new Error('Nomor tujuan tidak terdaftar di WhatsApp.');
-      error.permanent = true;
-      throw error;
+    let jid = target;
+    if (!target.endsWith('@g.us') && !target.endsWith('@s.whatsapp.net')) {
+      const phone = normalizePhone(target);
+      const [result] = await this.socket.onWhatsApp(phone);
+      if (!result?.exists) {
+        const error = new Error('Nomor tujuan tidak terdaftar di WhatsApp.');
+        error.permanent = true;
+        throw error;
+      }
+      jid = result.jid;
     }
-    await this.socket.sendMessage(result.jid, { text: message });
+
+    if (target.endsWith('@s.whatsapp.net') && !target.endsWith('@g.us')) {
+      jid = target;
+    }
+
+    const payload = attachment?.buffer
+      ? attachment.mimetype === 'application/pdf'
+        ? {
+            document: attachment.buffer,
+            mimetype: attachment.mimetype,
+            fileName: attachment.originalName,
+            caption: message || undefined,
+          }
+        : {
+            image: attachment.buffer,
+            mimetype: attachment.mimetype,
+            caption: message || undefined,
+          }
+      : { text: message };
+    await this.socket.sendMessage(jid, payload);
+  }
+
+  async getGroups() {
+    if (!this.socket || !this.isConnected()) return [];
+    const groups = await this.socket.groupFetchAllParticipating();
+    return Object.entries(groups).map(([id, group]) => ({
+      id,
+      name: group.subject ?? id,
+      participants: group.participants?.length ?? 0,
+    }));
+  }
+
+  getContacts() {
+    return [...this.contacts.values()]
+      .filter((contact) => contact.id && !contact.id.endsWith('@g.us'))
+      .map((contact) => ({
+        id: contact.id,
+        name: contact.name ?? contact.notify ?? contact.verifiedName ?? contact.id,
+      }));
   }
 
   isConnected() {

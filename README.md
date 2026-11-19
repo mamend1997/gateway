@@ -41,13 +41,14 @@ Salin `.env.example` menjadi `.env` dan atur:
 | --- | --- |
 | `PORT` | Port HTTP; Railway menyediakan nilainya otomatis. |
 | `API_KEY` | Wajib. Kunci untuk seluruh endpoint `/api/*`, termasuk status dan QR. |
-| `AUTH_DIR` | Folder kredensial Baileys; arahkan ke volume persisten pada Railway. |
+| `AUTH_DIR` | Folder kredensial semua device Baileys; arahkan ke volume persisten pada Railway. |
+| `DATA_DIR` | Penyimpanan daftar device, jadwal, dan aturan auto-reply. Gunakan volume persisten pada Railway. |
 | `ADMIN_PHONE` | Opsional, nomor admin format internasional. Setelah koneksi pulih, gateway mencoba mengirim notifikasi bahwa koneksi sempat terputus. |
 | `CORS_ORIGIN` | Origin web yang boleh memanggil API, dipisahkan koma. Default `*`; untuk produksi, batasi ke origin aplikasi Anda. |
 | `MIN_SEND_DELAY_MS` / `MAX_SEND_DELAY_MS` | Batas jeda acak antar pesan. Default 2000–4000 ms. |
 | `MAX_RETRIES` | Jumlah retry setelah percobaan pertama. Default 2. |
 
-Sesi tersimpan pada `AUTH_DIR`. Jangan hapus folder itu jika ingin mempertahankan login. QR dan seluruh API dilindungi API key; jangan bagikan QR maupun API key. Jika WhatsApp menyatakan sesi logout (bukan sekadar koneksi terputus), hentikan service, hapus isi folder `AUTH_DIR` secara manual, lalu jalankan ulang dan scan QR baru.
+Sesi device utama tersimpan langsung di `AUTH_DIR`; device tambahan disimpan di subfoldernya. Jadwal dan aturan auto-reply disimpan sebagai JSON di `DATA_DIR`. Pastikan kedua folder dipasang pada penyimpanan persisten di Railway. QR dan seluruh API dilindungi API key; jangan bagikan QR maupun API key. Jika WhatsApp menyatakan sesi utama logout (bukan sekadar koneksi terputus), hentikan service, hapus file sesi di `AUTH_DIR` secara manual, lalu jalankan ulang dan scan QR baru. Sesi device tambahan dapat dihapus dari menu **Devices**.
 
 ## REST API
 
@@ -81,6 +82,15 @@ Authorization: Bearer <API_KEY>
 {"phone":"{phone}","message":"{message}"}
 ```
 
+Endpoint ini juga menerima `application/x-www-form-urlencoded`, jadi dapat dipasang pada form gateway web seperti berikut:
+
+- **URL Gateway:** `https://gateway-production-a1168195.up.railway.app/api/send-message`
+- **Token / API Key:** isi dengan nilai `API_KEY` dari Variables Railway
+- **Format body:** `form-urlencoded (target, message)`
+- **Header otorisasi:** `Authorization: <API_KEY>` atau `Authorization: Bearer <API_KEY>`
+
+Pastikan endpoint dan domain sesuai deployment aktif Anda. Jangan tempelkan token asli ke kode frontend publik.
+
 Contoh `curl`:
 
 ```bash
@@ -104,7 +114,45 @@ const response = await fetch("https://<nama-proyek>.up.railway.app/api/send-mess
 const result = await response.json();
 ```
 
-`GET /api/messages` mengembalikan log terkini hingga 500 pesan beserta waktu, nomor, cuplikan pesan, status, jumlah percobaan, dan error. `onWhatsApp` memeriksa nomor sebelum pesan dikirim; nomor yang tidak terdaftar ditandai gagal tanpa retry.
+`GET /api/messages` mengembalikan log terkini hingga 500 pesan per device beserta waktu, nomor/grup, cuplikan pesan, status, jumlah percobaan, lampiran, dan error. Log antrean berada di memori proses; jadwal dan aturan auto-reply tersimpan persisten.
+
+### Dashboard dan fitur tambahan
+
+- **Devices** mengelola beberapa sesi WhatsApp. Setiap device tambahan memerlukan QR scan tersendiri. Sesi yang sudah ada sebelumnya tetap menjadi **Perangkat utama**.
+- **Pesan Masal** menerima daftar nomor manual, kontak yang disinkronkan WhatsApp, grup, atau file Excel `.xlsx` dengan nomor di kolom bernama `phone`, `number`, `nomor`, `target`, `jid`, atau kolom pertama. Satu batch dibatasi 500 tujuan.
+- Pesan massal dapat menyertakan satu gambar atau PDF hingga 16 MB. Antrean memproses pesan berurutan menggunakan jeda acak yang dipilih pada form.
+- **Jadwal Pesan** menyimpan pengiriman satu kali ke waktu mendatang. Jadwal yang tertunda diproses kembali setelah restart jika `DATA_DIR` persisten.
+- **Auto Reply** mencocokkan kata kunci secara tidak peka huruf besar/kecil dan membalas pesan masuk yang berisi kata tersebut. Aturan dapat ditujukan ke semua device atau satu device.
+- **Riwayat Pesan** menampilkan status antrean dan percobaan pengiriman untuk proses yang berjalan saat ini.
+
+API tambahan (semuanya tetap memerlukan API key):
+
+| Method dan path | Fungsi |
+| --- | --- |
+| `GET /api/devices` | Daftar device dan status koneksi |
+| `POST /api/devices` (`{"name":"Admin"}`) | Membuat sesi WhatsApp baru |
+| `DELETE /api/devices/:id` | Menghapus device tambahan beserta sesi lokalnya |
+| `GET /api/devices/:id/contacts` / `groups` | Membaca kontak/grup device |
+| `POST /api/send-bulk` | Antrekan daftar tujuan sebagai batch |
+| `POST /api/import-excel` | Impor file Excel dengan multipart field `file` |
+| `GET`, `POST`, `DELETE /api/schedules` | Mengelola jadwal pesan |
+| `GET`, `POST`, `PATCH`, `DELETE /api/auto-replies` | Mengelola aturan auto-reply |
+
+`POST /api/send-bulk` menerima `multipart/form-data`: `targets` (JSON array), `deviceId`, `message`, `minDelaySeconds`, `maxDelaySeconds`, dan opsional `attachment`. Contoh sederhana tanpa lampiran:
+
+```js
+const form = new FormData();
+form.append("targets", JSON.stringify(["081234567890", "6285712345678"]));
+form.append("deviceId", "primary");
+form.append("message", "Halo");
+form.append("minDelaySeconds", "4");
+form.append("maxDelaySeconds", "8");
+await fetch("https://<nama-proyek>.up.railway.app/api/send-bulk", {
+  method: "POST",
+  headers: { "x-api-key": "<API_KEY>" },
+  body: form
+});
+```
 
 ## GitHub
 
@@ -124,8 +172,8 @@ Jangan pernah menjalankan `git add -f` untuk `.env` atau direktori autentikasi.
 ## Deploy ke Railway
 
 1. Push repository ke GitHub dan buat project Railway dari repository tersebut. Build/start menggunakan `npm install` dan script `npm start`.
-2. Pada **Variables**, atur `API_KEY` (nilai rahasia sendiri), `AUTH_DIR=/app/auth_info`, `ADMIN_PHONE` bila perlu, dan `CORS_ORIGIN` ke origin frontend. Railway mengatur `PORT` secara otomatis.
-3. Tambahkan **Volume** pada service dan set mount path ke `/app/auth_info`, sama dengan `AUTH_DIR`. Volume menjaga kredensial sesi lintas restart/redeploy; pastikan direktori tersebut hanya digunakan oleh service ini.
+2. Pada **Variables**, atur `API_KEY` (nilai rahasia sendiri), `AUTH_DIR=/app/auth_info`, `DATA_DIR=/app/data`, `ADMIN_PHONE` bila perlu, dan `CORS_ORIGIN` ke origin frontend. Railway mengatur `PORT` secara otomatis.
+3. Pasang volume persisten pada `/app/auth_info` dan satu lagi pada `/app/data`, sama dengan `AUTH_DIR` dan `DATA_DIR`. Volume pertama menjaga sesi WhatsApp; volume kedua menjaga daftar device, jadwal, dan auto-reply lintas restart/redeploy.
 4. Deploy. Buka URL publik service untuk dashboard, masukkan API key, lalu scan QR. Gunakan endpoint `https://<nama-proyek>.up.railway.app/api/send-message` dari aplikasi web eksternal dengan header API key.
 
 Pada Railway, notifikasi admin tidak dapat dikirim ketika koneksi sedang putus; jika `ADMIN_PHONE` diisi, gateway mencoba mengirim pemberitahuan setelah koneksi tersambung kembali.

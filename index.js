@@ -4,13 +4,16 @@ import { fileURLToPath } from 'node:url';
 import cors from 'cors';
 import express from 'express';
 import { createApiRouter } from './routes/api.js';
-import { MessageQueue } from './services/queue.js';
-import { WhatsAppClient } from './services/waClient.js';
+import { QueueManager } from './services/queue.js';
+import { WhatsAppManager } from './services/waManager.js';
+import { MessageScheduler } from './services/scheduler.js';
+import { AutoReplyService } from './services/autoReply.js';
 
 const currentDir = path.dirname(fileURLToPath(import.meta.url));
 const port = Number.parseInt(process.env.PORT ?? '3000', 10);
 const apiKey = process.env.API_KEY?.trim();
 const authDir = path.resolve(currentDir, process.env.AUTH_DIR ?? './auth_info');
+const dataDir = path.resolve(currentDir, process.env.DATA_DIR ?? './data');
 const minDelayMs = Number.parseInt(process.env.MIN_SEND_DELAY_MS ?? '2000', 10);
 const maxDelayMs = Number.parseInt(process.env.MAX_SEND_DELAY_MS ?? '4000', 10);
 const maxRetries = Number.parseInt(process.env.MAX_RETRIES ?? '2', 10);
@@ -37,32 +40,41 @@ const corsOrigins = (process.env.CORS_ORIGIN ?? '*')
 app.disable('x-powered-by');
 app.use(cors({
   origin: corsOrigins.includes('*') ? '*' : corsOrigins,
-  methods: ['GET', 'POST', 'OPTIONS'],
+  methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-API-Key'],
 }));
-app.use(express.json({ limit: '32kb' }));
+app.use(express.json({ limit: '1mb' }));
+app.use(express.urlencoded({ extended: false, limit: '1mb' }));
 app.use(express.static(path.join(currentDir, 'public')));
 
-const waClient = new WhatsAppClient({
+const waManager = new WhatsAppManager({
   authDir,
+  dataDir,
   adminPhone: process.env.ADMIN_PHONE,
 });
-const queue = new MessageQueue({
-  waClient,
+const queue = new QueueManager({
+  waManager,
   minDelayMs,
   maxDelayMs,
   maxRetries,
 });
+const scheduler = new MessageScheduler({ dataDir, queueManager: queue });
+const autoReply = new AutoReplyService({ dataDir, waManager, queueManager: queue });
 
-app.use('/api', createApiRouter({ apiKey, queue, waClient }));
+app.use('/api', createApiRouter({ apiKey, queue, waManager, scheduler, autoReply }));
 app.get('/', (_request, response) => {
   response.sendFile(path.join(currentDir, 'public', 'index.html'));
 });
 
 const server = app.listen(port, '0.0.0.0', () => {
   console.log(`WhatsApp Gateway berjalan di http://0.0.0.0:${port}`);
-  waClient.start().catch((error) => {
-    console.error('Gagal memulai klien WhatsApp:', error);
+  void (async () => {
+    await autoReply.start();
+    await waManager.start();
+    await scheduler.start();
+  })().catch((error) => {
+    console.error('Gagal memulai layanan gateway:', error);
+    server.close(() => process.exit(1));
   });
 });
 
@@ -71,9 +83,10 @@ async function shutdown(signal) {
   if (isShuttingDown) return;
   isShuttingDown = true;
   console.log(`Menerima ${signal}; menutup aplikasi...`);
+  await scheduler.stop();
   queue.stop();
   await new Promise((resolve) => server.close(resolve));
-  await waClient.stop();
+  await waManager.stop();
   process.exit(0);
 }
 

@@ -3,188 +3,762 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="theme-color" content="#0f172a">
+    <meta name="theme-color" content="#087d73">
     <title>WhatsApp Gateway</title>
     <style>
-      :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; background: #0b1220; color: #e2e8f0; }
+      :root {
+        color-scheme: light;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        color: #172338;
+        background: #edf2f7;
+        font-synthesis: none;
+        text-rendering: optimizeLegibility;
+      }
       * { box-sizing: border-box; }
       body { margin: 0; min-height: 100vh; }
-      main { width: min(1120px, calc(100% - 32px)); margin: 40px auto; }
-      h1 { margin: 0 0 8px; font-size: clamp(1.7rem, 4vw, 2.3rem); }
-      h2 { margin: 0 0 16px; font-size: 1.15rem; }
-      p { color: #94a3b8; }
-      .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 18px; margin-top: 24px; }
-      .card { background: #111c2f; border: 1px solid #263449; border-radius: 14px; padding: 20px; }
-      .row { display: flex; align-items: center; gap: 10px; }
-      .badge { padding: 5px 10px; border-radius: 999px; background: #334155; font-size: .85rem; }
-      .badge.open { color: #86efac; background: #14532d; }
-      .badge.close { color: #fca5a5; background: #7f1d1d; }
-      .warning { color: #fecaca; background: #451a1a; padding: 12px; border-radius: 8px; margin-top: 14px; }
-      label { display: block; color: #cbd5e1; margin: 12px 0 6px; font-size: .92rem; }
-      input, textarea { width: 100%; color: #f8fafc; background: #0b1220; border: 1px solid #334155; border-radius: 8px; padding: 11px 12px; font: inherit; }
-      textarea { min-height: 95px; resize: vertical; }
-      button { cursor: pointer; border: 0; border-radius: 8px; padding: 10px 15px; color: #052e16; background: #4ade80; font: inherit; font-weight: 650; margin-top: 12px; }
-      button.secondary { color: #e2e8f0; background: #334155; }
-      .qr { display: block; width: min(260px, 100%); background: white; border-radius: 8px; padding: 8px; margin: 16px auto 0; }
-      .muted, #message { color: #94a3b8; font-size: .9rem; }
+      button, input, select, textarea { font: inherit; }
+      button { cursor: pointer; }
+      .app { display: flex; min-height: 100vh; }
+      .sidebar {
+        position: fixed; inset: 0 auto 0 0; z-index: 3; display: flex; flex-direction: column;
+        width: 270px; padding: 18px 10px 12px; color: #e7fbf8;
+        background: linear-gradient(160deg, #148d83, #075e59 75%, #064d49);
+        box-shadow: 5px 0 22px #19344a20;
+      }
+      .brand { display: flex; align-items: center; gap: 12px; padding: 8px 14px 22px; color: white; font-size: 1.15rem; font-weight: 750; }
+      .brand-mark { display: grid; width: 34px; height: 34px; place-items: center; border: 1px solid #a6f1e7; border-radius: 11px; }
+      .nav { display: grid; gap: 8px; }
+      .nav-link {
+        display: flex; align-items: center; gap: 13px; width: 100%; padding: 13px 15px;
+        border: 0; border-radius: 13px; color: #d7efed; background: transparent;
+        text-align: left; font-weight: 650; transition: .15s ease;
+      }
+      .nav-link:hover { background: #ffffff19; color: white; }
+      .nav-link.active { color: #126a60; background: #d7f7f1; box-shadow: 0 7px 16px #073b382b; }
+      .nav-icon { display: inline-grid; width: 22px; place-items: center; font-size: 1.1rem; }
+      .sidebar-bottom { margin-top: auto; padding-top: 12px; border-top: 1px solid #ffffff35; }
+      .sidebar-bottom .nav-link { justify-content: center; border: 1px solid #d5fff159; }
+      .main { width: calc(100% - 270px); margin-left: 270px; padding: 27px clamp(18px, 3vw, 42px) 48px; }
+      .topbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; max-width: 1260px; margin: 0 auto 22px; }
+      h1 { margin: 0; font-size: clamp(1.45rem, 2.4vw, 1.9rem); letter-spacing: -.025em; }
+      h2 { margin: 0 0 17px; font-size: 1rem; }
+      .subtitle { margin: 5px 0 0; color: #718198; font-size: .92rem; }
+      .top-actions { display: flex; align-items: center; gap: 9px; }
+      .connection-pill, .badge { display: inline-flex; align-items: center; gap: 7px; padding: 7px 11px; border-radius: 99px; color: #64748b; background: #e0e7ef; font-size: .82rem; font-weight: 650; }
+      .connection-pill.open, .badge.open, .badge.sent { color: #12804b; background: #dcfce9; }
+      .connection-pill.close, .badge.close, .badge.failed { color: #b42318; background: #fee4e2; }
+      .connection-pill.connecting, .badge.connecting, .badge.queued, .badge.scheduled, .badge.processing { color: #9a6700; background: #fff3cd; }
+      .page-view { display: none; max-width: 1260px; margin: 0 auto; }
+      .page-view.active { display: block; }
+      .composer-grid { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(330px, .9fr); align-items: start; gap: 22px; }
+      .card { min-width: 0; padding: 24px; border: 1px solid #e8edf3; border-radius: 18px; background: #fff; box-shadow: 0 8px 22px #20334b0a; }
+      .card + .card { margin-top: 18px; }
+      label { display: block; margin: 0 0 8px; color: #28374d; font-size: .88rem; font-weight: 700; }
+      .field { margin-top: 20px; }
+      .field:first-child { margin-top: 0; }
+      input, select, textarea {
+        width: 100%; min-width: 0; padding: 12px 14px; border: 1px solid #dce5ef; border-radius: 12px;
+        color: #26354a; background: #f8fafc; outline: none; transition: border-color .15s, box-shadow .15s;
+      }
+      input:focus, select:focus, textarea:focus { border-color: #1c9a76; box-shadow: 0 0 0 3px #1c9a761c; }
+      textarea { min-height: 106px; resize: vertical; }
+      .manual-targets { min-height: 89px; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: .85rem; }
+      .help { margin: 7px 0 0; color: #7d8b9b; font-size: .82rem; line-height: 1.5; }
+      .source-tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 7px; padding: 7px; border-radius: 14px; background: #f0f4f8; }
+      .source-tab { padding: 10px 7px; border: 0; border-radius: 11px; color: #718096; background: transparent; font-size: .88rem; font-weight: 700; }
+      .source-tab.active { color: #168047; background: white; box-shadow: 0 3px 8px #20334b17; }
+      .source-panel { margin-top: 15px; }
+      .directory-list { display: grid; gap: 6px; max-height: 195px; overflow: auto; padding: 3px; }
+      .directory-item { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 9px; background: #f7f9fb; font-size: .88rem; }
+      .directory-item input { width: 17px; height: 17px; margin: 0; accent-color: #15976f; }
+      .file-drop { display: grid; min-height: 125px; place-items: center; padding: 18px; border: 2px dashed #cbd9e8; border-radius: 16px; color: #61728a; background: #f8fafc; text-align: center; }
+      .file-drop strong { display: block; margin: 5px 0; color: #334155; font-size: .87rem; }
+      .file-drop input { max-width: 255px; padding: 6px; border: 0; background: transparent; }
+      .delay-row { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 10px; max-width: 245px; }
+      .delay-row input { text-align: center; }
+      .separator { color: #7c8998; }
+      .button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 43px; padding: 10px 16px; border: 0; border-radius: 11px; color: white; background: linear-gradient(100deg, #1dc667, #138642); font-weight: 750; }
+      .button:hover { filter: brightness(.97); }
+      .button:disabled { cursor: wait; opacity: .65; }
+      .button.secondary { color: #334155; background: #e6edf4; }
+      .button.danger { color: #a52b2b; background: #fee8e6; }
+      .button.small { min-height: 34px; padding: 6px 10px; font-size: .82rem; }
+      .button.full { width: 100%; margin-top: 20px; }
+      .button-row { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+      .schedule-box { margin-top: 14px; }
+      .feedback { min-height: 20px; margin: 12px 0 0; font-size: .88rem; }
+      .feedback.error { color: #b42318; }
+      .feedback.success { color: #12804b; }
+      .warning { margin-top: 14px; padding: 12px 14px; border: 1px solid #f4cf90; border-radius: 12px; color: #885b10; background: #fff7e6; font-size: .87rem; }
+      .qr { display: block; width: min(250px, 100%); margin: 18px auto 4px; padding: 8px; border: 1px solid #e2e8f0; border-radius: 14px; background: white; }
+      .status-detail { color: #708197; font-size: .88rem; }
+      .section-heading { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin: 2px 0 18px; }
+      .section-heading h2 { margin: 0; }
+      .two-col { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+      .form-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
       .table-wrap { overflow-x: auto; }
-      table { width: 100%; border-collapse: collapse; min-width: 700px; }
-      th, td { text-align: left; padding: 11px 10px; border-bottom: 1px solid #263449; vertical-align: top; font-size: .9rem; }
-      th { color: #94a3b8; font-weight: 600; }
-      .error { color: #fca5a5; }
-      .success { color: #86efac; }
-      #connectPanel { display: none; }
-      @media (max-width: 600px) { main { margin: 24px auto; } .card { padding: 16px; } }
+      table { width: 100%; min-width: 680px; border-collapse: collapse; }
+      th, td { padding: 12px 10px; border-bottom: 1px solid #edf1f5; text-align: left; vertical-align: middle; font-size: .86rem; }
+      th { color: #718096; font-size: .77rem; text-transform: uppercase; letter-spacing: .045em; }
+      .empty { padding: 28px 12px; color: #8794a5; text-align: center; }
+      .device-card { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+      .device-info { min-width: 0; }
+      .device-info h3 { margin: 0 0 5px; font-size: .98rem; }
+      .device-info p { margin: 0; color: #748398; font-size: .82rem; }
+      .api-row { display: flex; gap: 9px; }
+      .api-row input { flex: 1; }
+      .hidden { display: none !important; }
+      @media (max-width: 980px) {
+        .sidebar { width: 220px; }
+        .main { width: calc(100% - 220px); margin-left: 220px; }
+        .composer-grid { grid-template-columns: 1fr; }
+      }
+      @media (max-width: 680px) {
+        .sidebar { position: sticky; inset: 0 auto auto 0; width: 64px; height: 100vh; padding: 10px 6px; }
+        .brand { justify-content: center; padding: 7px 0 18px; }
+        .brand-name, .nav-label { display: none; }
+        .nav-link { justify-content: center; padding: 13px 7px; }
+        .nav-icon { width: auto; font-size: 1.25rem; }
+        .sidebar-bottom .nav-link { font-size: 0; }
+        .main { width: calc(100% - 64px); margin-left: 0; padding: 20px 14px 36px; }
+        .topbar { align-items: flex-start; }
+        .top-actions { flex-direction: column; align-items: flex-end; }
+        .card { padding: 18px; }
+        .two-col, .form-row { grid-template-columns: 1fr; }
+        .source-tabs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      }
     </style>
   </head>
   <body>
-    <main>
-      <h1>WhatsApp Gateway</h1>
-      <p>Monitor koneksi dan antrean pesan WhatsApp.</p>
-
-      <section class="card">
-        <h2>Akses dashboard</h2>
-        <label for="apiKey">API key</label>
-        <input id="apiKey" type="password" autocomplete="off" placeholder="Masukkan API_KEY">
-        <button id="saveKey" class="secondary" type="button">Simpan di sesi browser</button>
-        <span id="authMessage" class="muted"></span>
-      </section>
-
-      <div class="grid">
-        <section class="card">
-          <h2>Status koneksi</h2>
-          <div class="row"><span id="statusBadge" class="badge">Memuat...</span><span id="updatedAt" class="muted"></span></div>
-          <div id="warning" class="warning" hidden>WhatsApp terputus. Jika QR tidak muncul setelah menunggu, sesi mungkin logout; ikuti petunjuk pemulihan sesi di README.</div>
-          <div id="connectPanel">
-            <p id="connectHelp">Scan QR menggunakan WhatsApp di ponsel yang akan menjadi perangkat tertaut.</p>
-            <img id="qr" class="qr" alt="QR code untuk menghubungkan WhatsApp" hidden>
-          </div>
-          <p id="statusError" class="error"></p>
-        </section>
-
-        <section class="card">
-          <h2>Uji kirim pesan</h2>
-          <form id="sendForm">
-            <label for="phone">Nomor tujuan</label>
-            <input id="phone" name="phone" placeholder="08xxxxxxxxxx atau 628xxxxxxxxxx" required>
-            <label for="text">Pesan</label>
-            <textarea id="text" name="message" required></textarea>
-            <button type="submit">Masukkan ke antrean</button>
-          </form>
-          <p id="message" role="status"></p>
-        </section>
-      </div>
-
-      <section class="card" style="margin-top:18px">
-        <h2>Log pengiriman</h2>
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>Waktu</th><th>Nomor</th><th>Pesan</th><th>Status</th><th>Percobaan</th><th>Keterangan</th></tr></thead>
-            <tbody id="logs"><tr><td colspan="6" class="muted">Belum ada pesan.</td></tr></tbody>
-          </table>
+    <div class="app">
+      <aside class="sidebar">
+        <div class="brand"><span class="brand-mark">W</span><span class="brand-name">Gateway</span></div>
+        <nav class="nav" aria-label="Navigasi utama">
+          <button class="nav-link" data-view="devices" aria-label="Devices"><span class="nav-icon">▣</span><span class="nav-label">Devices</span></button>
+          <button class="nav-link active" data-view="compose" aria-label="Pesan Masal"><span class="nav-icon">➤</span><span class="nav-label">Pesan Masal</span></button>
+          <button class="nav-link" data-view="schedules" aria-label="Jadwal Pesan"><span class="nav-icon">▦</span><span class="nav-label">Jadwal Pesan</span></button>
+          <button class="nav-link" data-view="autoreply" aria-label="Auto Reply"><span class="nav-icon">▤</span><span class="nav-label">Auto Reply</span></button>
+          <button class="nav-link" data-view="history" aria-label="Riwayat Pesan"><span class="nav-icon">◷</span><span class="nav-label">Riwayat Pesan</span></button>
+          <button class="nav-link" data-view="settings" aria-label="Pengaturan"><span class="nav-icon">⚙</span><span class="nav-label">Pengaturan</span></button>
+        </nav>
+        <div class="sidebar-bottom">
+          <button id="logoutButton" class="nav-link" type="button"><span class="nav-icon">⇥</span><span class="nav-label">Keluar</span></button>
         </div>
-      </section>
-    </main>
+      </aside>
+
+      <main class="main">
+        <header class="topbar">
+          <div>
+            <h1 id="pageTitle">Pesan Masal</h1>
+            <p id="pageSubtitle" class="subtitle">Kirim pesan ke banyak nomor atau grup sekaligus.</p>
+          </div>
+          <div class="top-actions">
+            <span id="headerStatus" class="connection-pill connecting">Memuat status...</span>
+            <button class="button secondary small" type="button" data-open-settings>API &nbsp;⚙</button>
+          </div>
+        </header>
+
+        <section id="view-compose" class="page-view active">
+          <form id="composeForm" class="composer-grid">
+            <section class="card">
+              <div class="field">
+                <label for="deviceSelect">▣ &nbsp;Device Pengirim</label>
+                <select id="deviceSelect" required><option value="primary">Memuat device...</option></select>
+                <p id="deviceStatus" class="help">Pilih device WhatsApp yang terhubung.</p>
+              </div>
+              <div class="field">
+                <label>♟ &nbsp;Sumber Data Tujuan</label>
+                <div class="source-tabs" role="tablist">
+                  <button class="source-tab active" type="button" data-source="manual">▤ Manual</button>
+                  <button class="source-tab" type="button" data-source="contacts">▣ Kontak</button>
+                  <button class="source-tab" type="button" data-source="groups">♧ Grup</button>
+                  <button class="source-tab" type="button" data-source="excel">▧ Excel</button>
+                </div>
+                <div id="source-manual" class="source-panel">
+                  <textarea id="manualTargets" class="manual-targets" placeholder="Contoh: 081234567890, 085712345678..."></textarea>
+                  <p class="help">Pisahkan nomor dengan koma (,) atau baris baru. Nomor 08xxx otomatis dinormalisasi.</p>
+                </div>
+                <div id="source-contacts" class="source-panel hidden">
+                  <div id="contactList" class="directory-list"><p class="help">Pilih device untuk memuat kontak.</p></div>
+                  <p class="help">Kontak yang tersedia bergantung pada data yang disinkronkan WhatsApp.</p>
+                </div>
+                <div id="source-groups" class="source-panel hidden">
+                  <div id="groupList" class="directory-list"><p class="help">Pilih device untuk memuat grup.</p></div>
+                </div>
+                <div id="source-excel" class="source-panel hidden">
+                  <div class="file-drop">
+                    <div><strong>Impor daftar nomor dari Excel</strong><span class="help">.xlsx — kolom nomor: phone, number, nomor, target, jid, atau kolom pertama</span></div>
+                    <input id="excelFile" type="file" accept=".xlsx">
+                    <button id="importExcel" class="button secondary small" type="button">Impor nomor</button>
+                  </div>
+                  <p id="excelFeedback" class="help"></p>
+                </div>
+              </div>
+            </section>
+
+            <section class="card">
+              <div class="field">
+                <label for="messageText">▢ &nbsp;Teks Pesan</label>
+                <textarea id="messageText" placeholder="Halo kak, info terbaru untuk Anda..."></textarea>
+              </div>
+              <div class="field">
+                <label for="attachment">♧ &nbsp;Lampiran <span class="help" style="display:inline">(opsional)</span></label>
+                <div class="file-drop">
+                  <div><strong>Klik untuk lampirkan gambar / PDF</strong><span class="help">Maks. 16 MB — dikirim ke semua target</span></div>
+                  <input id="attachment" type="file" accept="image/*,.pdf,application/pdf">
+                  <span id="attachmentName" class="help"></span>
+                </div>
+              </div>
+              <div class="field">
+                <label for="minDelay">◷ &nbsp;Jeda Acak per Pesan (detik)</label>
+                <div class="delay-row">
+                  <input id="minDelay" type="number" min="0" max="3600" value="4" required aria-label="Jeda minimum">
+                  <span class="separator">s/d</span>
+                  <input id="maxDelay" type="number" min="0" max="3600" value="8" required aria-label="Jeda maksimum">
+                </div>
+                <p class="help">Jeda acak antar pesan untuk mengatur laju antrean; kirim hanya ke penerima yang setuju menerima pesan.</p>
+              </div>
+              <div id="scheduleBox" class="field schedule-box hidden">
+                <label for="runAt">Waktu pengiriman</label>
+                <input id="runAt" type="datetime-local">
+              </div>
+              <div class="button-row" style="margin-top:20px">
+                <button id="scheduleMode" class="button secondary" type="button">▦ Jadwalkan</button>
+                <button id="sendButton" class="button" type="submit" style="flex:1">➤ &nbsp;Kirim</button>
+              </div>
+              <p id="composeFeedback" class="feedback" role="status"></p>
+            </section>
+          </form>
+        </section>
+
+        <section id="view-devices" class="page-view">
+          <div class="section-heading"><div><h2>Devices WhatsApp</h2><p class="subtitle">Kelola sesi WhatsApp yang terhubung.</p></div></div>
+          <section class="card">
+            <form id="addDeviceForm" class="form-row">
+              <div><label for="newDeviceName">Nama device baru</label><input id="newDeviceName" maxlength="64" placeholder="Contoh: Admin Toko" required></div>
+              <div style="align-self:end"><button class="button" type="submit">＋ Tambah device</button></div>
+            </form>
+            <p id="deviceFeedback" class="feedback" role="status"></p>
+          </section>
+          <div id="deviceCards"></div>
+          <section class="card">
+            <div class="section-heading"><h2>QR device terpilih</h2><span id="deviceQrStatus" class="badge connecting">Memuat</span></div>
+            <p id="deviceQrHelp" class="status-detail">Pilih device dan scan QR dari menu Perangkat tertaut di WhatsApp.</p>
+            <img id="deviceQr" class="qr hidden" alt="QR code WhatsApp">
+            <div id="deviceWarning" class="warning hidden">Koneksi WhatsApp terputus. Jika sesi logout, sambungkan ulang dengan memindai QR baru.</div>
+          </section>
+        </section>
+
+        <section id="view-schedules" class="page-view">
+          <div class="section-heading">
+            <div><h2>Jadwal Pesan</h2><p class="subtitle">Jadwal disimpan di penyimpanan persisten aplikasi.</p></div>
+            <button id="newSchedule" class="button" type="button">＋ Buat jadwal</button>
+          </div>
+          <section class="card"><div class="table-wrap"><table>
+            <thead><tr><th>Waktu</th><th>Device</th><th>Tujuan</th><th>Pesan</th><th>Status</th><th>Aksi</th></tr></thead>
+            <tbody id="scheduleRows"><tr><td colspan="6" class="empty">Belum ada jadwal.</td></tr></tbody>
+          </table></div></section>
+        </section>
+
+        <section id="view-autoreply" class="page-view">
+          <div class="section-heading"><div><h2>Aturan Auto Reply</h2><p class="subtitle">Balas pesan masuk saat berisi salah satu kata kunci berikut.</p></div></div>
+          <section class="card">
+            <form id="autoReplyForm">
+              <div class="form-row">
+                <div><label for="ruleDevice">Device</label><select id="ruleDevice"></select></div>
+                <div><label for="ruleKeyword">Kata kunci</label><input id="ruleKeyword" maxlength="200" placeholder="Contoh: harga" required></div>
+              </div>
+              <div class="field"><label for="ruleReply">Balasan otomatis</label><textarea id="ruleReply" maxlength="4000" placeholder="Tulis balasan..." required></textarea></div>
+              <button class="button" type="submit">＋ Simpan aturan</button>
+              <p id="ruleFeedback" class="feedback" role="status"></p>
+            </form>
+          </section>
+          <div id="ruleCards"></div>
+        </section>
+
+        <section id="view-history" class="page-view">
+          <div class="section-heading"><div><h2>Riwayat Pesan</h2><p class="subtitle">Log pengiriman dan status antrean terkini.</p></div><button id="refreshHistory" class="button secondary small" type="button">Muat ulang</button></div>
+          <section class="card"><div class="table-wrap"><table>
+            <thead><tr><th>Waktu</th><th>Device</th><th>Nomor / Grup</th><th>Pesan</th><th>Status</th><th>Percobaan</th><th>Keterangan</th></tr></thead>
+            <tbody id="historyRows"><tr><td colspan="7" class="empty">Belum ada pesan.</td></tr></tbody>
+          </table></div></section>
+        </section>
+
+        <section id="view-settings" class="page-view">
+          <div class="section-heading"><div><h2>Pengaturan</h2><p class="subtitle">Akses API dan preferensi dashboard.</p></div></div>
+          <section class="card">
+            <h2>Akses dashboard</h2>
+            <label for="apiKey">API key Railway</label>
+            <div class="api-row"><input id="apiKey" type="password" autocomplete="off" placeholder="Masukkan API_KEY"><button id="saveKey" class="button" type="button">Simpan</button></div>
+            <p id="authMessage" class="feedback" role="status">API key hanya disimpan pada sesi browser ini.</p>
+          </section>
+          <section class="card">
+            <h2>Catatan koneksi</h2>
+            <p class="status-detail">Kredensial WhatsApp berada di volume AUTH_DIR. Jadwal dan aturan auto-reply berada di DATA_DIR dan perlu volume persisten terpisah pada Railway.</p>
+            <p class="status-detail">Gunakan API key melalui backend aplikasi Anda; jangan menanamnya di frontend publik.</p>
+          </section>
+        </section>
+      </main>
+    </div>
+
     <script>
-      const apiKeyInput = document.querySelector('#apiKey');
-      const authMessage = document.querySelector('#authMessage');
+      const $ = (selector) => document.querySelector(selector);
+      const apiKeyInput = $('#apiKey');
+      const authMessage = $('#authMessage');
+      const pages = {
+        compose: ['Pesan Masal', 'Kirim pesan ke banyak nomor atau grup sekaligus.'],
+        devices: ['Devices', 'Kelola device dan status koneksi WhatsApp.'],
+        schedules: ['Jadwal Pesan', 'Atur pengiriman pesan pada waktu tertentu.'],
+        autoreply: ['Auto Reply', 'Buat balasan otomatis berdasarkan kata kunci.'],
+        history: ['Riwayat Pesan', 'Pantau status antrean dan hasil pengiriman.'],
+        settings: ['Pengaturan', 'Kelola akses dashboard dan konfigurasi.'],
+      };
+      let devices = [];
+      let devicesLoaded = false;
+      let activeSource = 'manual';
+      let composeMode = 'send';
+
       apiKeyInput.value = sessionStorage.getItem('gateway-api-key') ?? '';
 
-      function headers() {
-        return { 'Content-Type': 'application/json', 'X-API-Key': apiKeyInput.value.trim() };
+      function setFeedback(node, text, kind = '') {
+        node.textContent = text;
+        node.className = `feedback ${kind}`;
       }
-      function setAuthError(error) {
-        authMessage.textContent = error;
-        authMessage.className = 'error';
-      }
-      document.querySelector('#saveKey').addEventListener('click', () => {
-        sessionStorage.setItem('gateway-api-key', apiKeyInput.value.trim());
-        authMessage.textContent = 'API key akan disimpan hingga tab browser ditutup.';
-        authMessage.className = 'success';
-        refresh();
-      });
-      document.querySelector('#sendForm').addEventListener('submit', async (event) => {
-        event.preventDefault();
-        const messageNode = document.querySelector('#message');
-        messageNode.textContent = 'Mengirim permintaan...';
-        messageNode.className = 'muted';
-        try {
-          const response = await fetch('/api/send-message', {
-            method: 'POST',
-            headers: headers(),
-            body: JSON.stringify({ phone: document.querySelector('#phone').value, message: document.querySelector('#text').value }),
-          });
-          const result = await response.json();
-          if (!response.ok) throw new Error(result.error ?? 'Permintaan gagal.');
-          messageNode.textContent = `Pesan masuk antrean (${result.id}).`;
-          messageNode.className = 'success';
-          event.target.reset();
-          refresh();
-        } catch (error) {
-          messageNode.textContent = error.message;
-          messageNode.className = 'error';
-        }
-      });
 
-      async function refresh() {
+      async function api(url, options = {}) {
+        const key = apiKeyInput.value.trim();
+        if (!key) throw new Error('Masukkan API key pada Pengaturan terlebih dahulu.');
+        const headers = new Headers(options.headers ?? {});
+        headers.set('X-API-Key', key);
+        if (options.body && !(options.body instanceof FormData)) headers.set('Content-Type', 'application/json');
+        const response = await fetch(url, { ...options, headers });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(result.error ?? `Permintaan gagal (${response.status}).`);
+        return result;
+      }
+
+      function showView(name) {
+        document.querySelectorAll('.page-view').forEach((view) => view.classList.toggle('active', view.id === `view-${name}`));
+        document.querySelectorAll('.nav-link[data-view]').forEach((button) => button.classList.toggle('active', button.dataset.view === name));
+        $('#pageTitle').textContent = pages[name][0];
+        $('#pageSubtitle').textContent = pages[name][1];
+        if (name === 'history') loadHistory();
+        if (name === 'schedules') loadSchedules();
+        if (name === 'autoreply') loadRules();
+        if (name === 'devices') loadDevices();
+      }
+
+      function setStatus(status) {
+        const pill = $('#headerStatus');
+        const label = status.status === 'open' ? 'Connected' : status.status;
+        pill.textContent = label || 'close';
+        pill.className = `connection-pill ${status.status ?? 'close'}`;
+        $('#deviceStatus').textContent = status.connected
+          ? 'Device terhubung dan siap mengirim.'
+          : status.error || 'Belum terhubung. Scan QR pada menu Devices.';
+        const qr = $('#deviceQr');
+        qr.classList.toggle('hidden', !status.qr);
+        if (status.qr) qr.src = status.qr;
+        $('#deviceQrStatus').textContent = label || 'close';
+        $('#deviceQrStatus').className = `badge ${status.status ?? 'close'}`;
+        $('#deviceQrHelp').textContent = status.qr
+          ? 'Scan QR menggunakan WhatsApp di ponsel yang akan menjadi perangkat tertaut.'
+          : status.connected ? 'WhatsApp terhubung.' : status.error || 'Menunggu koneksi atau QR WhatsApp...';
+        $('#deviceWarning').classList.toggle('hidden', status.connected || Boolean(status.qr));
+      }
+
+      function selectedDeviceId() {
+        return $('#deviceSelect').value || 'primary';
+      }
+
+      function renderDeviceSelects() {
+        const current = localStorage.getItem('gateway-device') || $('#deviceSelect').value || 'primary';
+        const options = devices.map((device) => {
+          const label = `${device.name}${device.connected ? ' - Terhubung' : ''}`;
+          return `<option value="${escapeAttribute(device.id)}">${escapeHtml(label)}</option>`;
+        }).join('');
+        $('#deviceSelect').innerHTML = options || '<option value="primary">Perangkat utama</option>';
+        $('#ruleDevice').innerHTML = `<option value="">Semua device</option>${options}`;
+        $('#deviceSelect').value = devices.some((device) => device.id === current) ? current : (devices[0]?.id ?? 'primary');
+        localStorage.setItem('gateway-device', $('#deviceSelect').value);
+      }
+
+      function escapeHtml(value) {
+        return String(value).replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
+      }
+      function escapeAttribute(value) { return escapeHtml(value); }
+
+      async function loadDevices() {
+        const result = await api('/api/devices');
+        devices = result.devices ?? [];
+        renderDeviceSelects();
+        const container = $('#deviceCards');
+        container.replaceChildren();
+        for (const device of devices) {
+          const card = document.createElement('section');
+          card.className = 'card';
+          card.innerHTML = `<div class="device-card"><div class="device-info"><h3>${escapeHtml(device.name)}</h3><p>${device.primary ? 'Perangkat utama' : 'Device tambahan'} · ${escapeHtml(device.id)}</p></div><div class="button-row"><span class="badge ${escapeAttribute(device.status)}">${device.connected ? 'Connected' : escapeHtml(device.status)}</span><button class="button secondary small" type="button" data-select-device="${escapeAttribute(device.id)}">Pilih</button>${device.primary ? '' : `<button class="button danger small" type="button" data-remove-device="${escapeAttribute(device.id)}">Hapus</button>`}</div></div>`;
+          container.append(card);
+        }
+        container.querySelectorAll('[data-select-device]').forEach((button) => button.addEventListener('click', () => {
+          $('#deviceSelect').value = button.dataset.selectDevice;
+          localStorage.setItem('gateway-device', button.dataset.selectDevice);
+          refreshStatus();
+          loadDirectory();
+        }));
+        container.querySelectorAll('[data-remove-device]').forEach((button) => button.addEventListener('click', () => removeDevice(button.dataset.removeDevice)));
+        devicesLoaded = true;
+        await refreshStatus();
+      }
+
+      async function refreshStatus() {
+        const status = await api(`/api/status?deviceId=${encodeURIComponent(selectedDeviceId())}`);
+        setStatus(status);
+      }
+
+      async function refreshAll() {
         if (!apiKeyInput.value.trim()) {
-          setAuthError('Masukkan API key untuk memuat status dan QR.');
+          $('#headerStatus').textContent = 'API key dibutuhkan';
+          $('#headerStatus').className = 'connection-pill close';
           return;
         }
         try {
-          const [statusResponse, messagesResponse] = await Promise.all([
-            fetch('/api/status', { headers: headers() }),
-            fetch('/api/messages', { headers: headers() }),
-          ]);
-          if (statusResponse.status === 401 || messagesResponse.status === 401) throw new Error('API key tidak valid.');
-          if (!statusResponse.ok || !messagesResponse.ok) throw new Error('Gagal memuat data dari server.');
-          const status = await statusResponse.json();
-          const { messages } = await messagesResponse.json();
-          authMessage.textContent = 'Terhubung ke API.';
-          authMessage.className = 'success';
-          const badge = document.querySelector('#statusBadge');
-          badge.textContent = status.status === 'open' ? 'Connected' : status.status;
-          badge.className = `badge ${status.status}`;
-          document.querySelector('#updatedAt').textContent = `Diperbarui ${new Date(status.updatedAt).toLocaleTimeString()}`;
-          document.querySelector('#warning').hidden = status.connected;
-          document.querySelector('#connectPanel').style.display = status.connected ? 'none' : 'block';
-          document.querySelector('#statusError').textContent = status.error ?? '';
-          const qr = document.querySelector('#qr');
-          qr.hidden = !status.qr;
-          if (status.qr) qr.src = status.qr;
-          renderMessages(messages);
+          if (!devicesLoaded || $('#view-devices').classList.contains('active')) await loadDevices();
+          else await refreshStatus();
+          if ($('#view-history').classList.contains('active')) await loadHistory();
+          if ($('#view-schedules').classList.contains('active')) await loadSchedules();
+          if ($('#view-autoreply').classList.contains('active')) await loadRules();
         } catch (error) {
-          setAuthError(error.message);
+          if ($('#authMessage')) setFeedback(authMessage, error.message, 'error');
+          $('#headerStatus').textContent = error.message.includes('API key') ? 'API key dibutuhkan' : 'API tidak tersedia';
+          $('#headerStatus').className = 'connection-pill close';
         }
       }
 
-      function renderMessages(messages) {
-        const tbody = document.querySelector('#logs');
-        tbody.replaceChildren();
-        if (!messages.length) {
-          const row = tbody.insertRow();
-          const cell = row.insertCell();
-          cell.colSpan = 6;
-          cell.className = 'muted';
-          cell.textContent = 'Belum ada pesan.';
-          return;
-        }
-        for (const item of messages) {
-          const row = tbody.insertRow();
-          const values = [
-            new Date(item.createdAt).toLocaleString(),
-            item.phone,
-            item.preview,
-            item.status,
-            item.attempts,
-            item.error ?? '—',
-          ];
-          for (const value of values) row.insertCell().textContent = String(value);
+      function setSource(source) {
+        activeSource = source;
+        document.querySelectorAll('.source-tab').forEach((button) => button.classList.toggle('active', button.dataset.source === source));
+        document.querySelectorAll('.source-panel').forEach((panel) => panel.classList.toggle('hidden', panel.id !== `source-${source}`));
+        if (source === 'contacts' || source === 'groups') loadDirectory();
+      }
+
+      async function loadDirectory() {
+        const groupMode = activeSource === 'groups';
+        const container = groupMode ? $('#groupList') : $('#contactList');
+        try {
+          container.replaceChildren();
+          const response = await api(`/api/devices/${encodeURIComponent(selectedDeviceId())}/${groupMode ? 'groups' : 'contacts'}`);
+          const items = groupMode ? response.groups : response.contacts;
+          if (!items.length) {
+            container.innerHTML = '<p class="help">Belum ada data. Pastikan device terhubung dan kontak/grup sudah tersinkron.</p>';
+            return;
+          }
+          for (const item of items) {
+            const label = document.createElement('label');
+            label.className = 'directory-item';
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.value = item.id;
+            checkbox.dataset.name = item.name;
+            label.append(checkbox, document.createTextNode(`${item.name}${groupMode ? ` (${item.participants} anggota)` : ''}`));
+            container.append(label);
+          }
+        } catch (error) {
+          container.textContent = error.message;
         }
       }
 
-      refresh();
-      setInterval(refresh, 3000);
+      async function importExcel() {
+        const file = $('#excelFile').files[0];
+        if (!file) return setFeedback($('#excelFeedback'), 'Pilih file .xlsx atau .xls terlebih dahulu.', 'error');
+        const formData = new FormData();
+        formData.append('file', file);
+        try {
+          const result = await api('/api/import-excel', { method: 'POST', body: formData });
+          $('#manualTargets').value = result.targets.map((target) => target.id).join('\n');
+          setFeedback($('#excelFeedback'), `${result.targets.length} tujuan berhasil diimpor. Beralih ke tab Manual untuk memeriksa daftar.`, 'success');
+          setSource('manual');
+        } catch (error) {
+          setFeedback($('#excelFeedback'), error.message, 'error');
+        }
+      }
+
+      function collectTargets() {
+        if (activeSource === 'manual') {
+          return $('#manualTargets').value.split(/[\n,;]+/).map((value) => value.trim()).filter(Boolean);
+        }
+        if (activeSource === 'contacts' || activeSource === 'groups') {
+          const container = activeSource === 'groups' ? $('#groupList') : $('#contactList');
+          return [...container.querySelectorAll('input:checked')].map((input) => ({ id: input.value, name: input.dataset.name }));
+        }
+        return $('#manualTargets').value.split(/[\n,;]+/).map((value) => value.trim()).filter(Boolean);
+      }
+
+      function composerFormData(targets, message, runAt) {
+        const formData = new FormData();
+        formData.append('targets', JSON.stringify(targets));
+        formData.append('message', message);
+        formData.append('deviceId', selectedDeviceId());
+        formData.append('minDelaySeconds', $('#minDelay').value);
+        formData.append('maxDelaySeconds', $('#maxDelay').value);
+        if (runAt) formData.append('runAt', runAt);
+        const attachment = $('#attachment').files[0];
+        if (attachment) formData.append('attachment', attachment);
+        return formData;
+      }
+
+      async function submitCompose(event) {
+        event.preventDefault();
+        const feedback = $('#composeFeedback');
+        const button = $('#sendButton');
+        button.disabled = true;
+        try {
+          const targets = collectTargets();
+          const message = $('#messageText').value.trim();
+          const attachment = $('#attachment').files[0];
+          if (!targets.length) throw new Error('Masukkan atau pilih setidaknya satu tujuan.');
+          if (!message && !attachment) throw new Error('Isi teks pesan atau pilih lampiran.');
+          if (attachment && attachment.size > 16 * 1024 * 1024) throw new Error('Ukuran lampiran maksimal 16 MB.');
+          if (Number($('#minDelay').value) > Number($('#maxDelay').value)) throw new Error('Jeda minimum tidak boleh melebihi jeda maksimum.');
+          const runAt = composeMode === 'schedule' ? new Date($('#runAt').value).toISOString() : '';
+          if (composeMode === 'schedule' && !$('#runAt').value) throw new Error('Pilih waktu jadwal.');
+          const endpoint = composeMode === 'schedule' ? '/api/schedules' : '/api/send-bulk';
+          const result = await api(endpoint, { method: 'POST', body: composerFormData(targets, message, runAt) });
+          setFeedback(feedback, composeMode === 'schedule'
+            ? `Jadwal berhasil disimpan untuk ${targets.length} tujuan.`
+            : `${result.queued} pesan masuk ke antrean.`, 'success');
+          $('#messageText').value = '';
+          $('#attachment').value = '';
+          $('#attachmentName').textContent = '';
+          if (composeMode === 'schedule') {
+            $('#runAt').value = '';
+            loadSchedules();
+          }
+          loadHistory();
+        } catch (error) {
+          setFeedback(feedback, error.message, 'error');
+        } finally {
+          button.disabled = false;
+        }
+      }
+
+      async function loadHistory() {
+        try {
+          const { messages } = await api('/api/messages');
+          const rows = $('#historyRows');
+          rows.replaceChildren();
+          if (!messages.length) return emptyRow(rows, 7, 'Belum ada pesan.');
+          for (const item of messages) {
+            const row = rows.insertRow();
+            const values = [
+              new Date(item.createdAt).toLocaleString(),
+              devices.find((device) => device.id === item.deviceId)?.name ?? item.deviceId ?? 'Perangkat utama',
+              item.phone,
+              `${item.preview}${item.hasAttachment ? ' [Lampiran]' : ''}`,
+              item.status,
+              item.attempts,
+              item.error ?? '—',
+            ];
+            for (const [index, value] of values.entries()) {
+              const cell = row.insertCell();
+              if (index === 4) {
+                const badge = document.createElement('span');
+                badge.className = `badge ${item.status}`;
+                badge.textContent = String(value);
+                cell.append(badge);
+              } else cell.textContent = String(value);
+            }
+          }
+        } catch (error) {
+          if (apiKeyInput.value.trim()) setFeedback(authMessage, error.message, 'error');
+        }
+      }
+
+      async function loadSchedules() {
+        try {
+          const { schedules } = await api('/api/schedules');
+          const rows = $('#scheduleRows');
+          rows.replaceChildren();
+          if (!schedules.length) return emptyRow(rows, 6, 'Belum ada jadwal.');
+          for (const schedule of schedules) {
+            const row = rows.insertRow();
+            const values = [
+              new Date(schedule.runAt).toLocaleString(),
+              devices.find((device) => device.id === schedule.deviceId)?.name ?? schedule.deviceId,
+              `${schedule.targets.length} tujuan`,
+              `${schedule.message || 'Lampiran'}${schedule.hasAttachment ? ' [Lampiran]' : ''}`,
+              schedule.status,
+            ];
+            for (const [index, value] of values.entries()) {
+              const cell = row.insertCell();
+              if (index === 4) {
+                const badge = document.createElement('span');
+                badge.className = `badge ${schedule.status}`;
+                badge.textContent = String(value);
+                cell.append(badge);
+              } else cell.textContent = String(value);
+            }
+            const action = row.insertCell();
+            if (schedule.status === 'scheduled') {
+              const cancel = document.createElement('button');
+              cancel.className = 'button danger small';
+              cancel.textContent = 'Batalkan';
+              cancel.addEventListener('click', () => cancelSchedule(schedule.id));
+              action.append(cancel);
+            } else action.textContent = '—';
+          }
+        } catch (error) {
+          setFeedback(authMessage, error.message, 'error');
+        }
+      }
+
+      function emptyRow(tbody, columns, message) {
+        const row = tbody.insertRow();
+        const cell = row.insertCell();
+        cell.colSpan = columns;
+        cell.className = 'empty';
+        cell.textContent = message;
+      }
+
+      async function cancelSchedule(id) {
+        try {
+          await api(`/api/schedules/${encodeURIComponent(id)}`, { method: 'DELETE' });
+          await loadSchedules();
+        } catch (error) {
+          setFeedback(authMessage, error.message, 'error');
+        }
+      }
+
+      async function loadRules() {
+        try {
+          const { rules } = await api('/api/auto-replies');
+          const container = $('#ruleCards');
+          container.replaceChildren();
+          for (const rule of rules) {
+            const card = document.createElement('section');
+            card.className = 'card';
+            card.innerHTML = `<div class="device-card"><div class="device-info"><h3>${escapeHtml(rule.keyword)}</h3><p>${escapeHtml(rule.reply)}</p><p>${escapeHtml(devices.find((device) => device.id === rule.deviceId)?.name ?? 'Semua device')}</p></div><div class="button-row"><button class="button secondary small" type="button" data-toggle-rule="${escapeAttribute(rule.id)}">${rule.enabled ? 'Aktif' : 'Nonaktif'}</button><button class="button danger small" type="button" data-delete-rule="${escapeAttribute(rule.id)}">Hapus</button></div></div>`;
+            container.append(card);
+          }
+          if (!rules.length) container.innerHTML = '<section class="card empty">Belum ada aturan auto-reply.</section>';
+          container.querySelectorAll('[data-toggle-rule]').forEach((button) => button.addEventListener('click', () => toggleRule(button.dataset.toggleRule, rules)));
+          container.querySelectorAll('[data-delete-rule]').forEach((button) => button.addEventListener('click', () => deleteRule(button.dataset.deleteRule)));
+        } catch (error) {
+          setFeedback(authMessage, error.message, 'error');
+        }
+      }
+
+      async function toggleRule(id, rules) {
+        const rule = rules.find((item) => item.id === id);
+        try {
+          await api(`/api/auto-replies/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ enabled: !rule.enabled }) });
+          await loadRules();
+        } catch (error) {
+          setFeedback(authMessage, error.message, 'error');
+        }
+      }
+
+      async function deleteRule(id) {
+        try {
+          await api(`/api/auto-replies/${encodeURIComponent(id)}`, { method: 'DELETE' });
+          await loadRules();
+        } catch (error) {
+          setFeedback(authMessage, error.message, 'error');
+        }
+      }
+
+      async function removeDevice(id) {
+        if (!confirm('Hapus device ini beserta sesi login lokalnya?')) return;
+        try {
+          await api(`/api/devices/${encodeURIComponent(id)}`, { method: 'DELETE' });
+          await loadDevices();
+          setFeedback($('#deviceFeedback'), 'Device dihapus.', 'success');
+        } catch (error) {
+          setFeedback($('#deviceFeedback'), error.message, 'error');
+        }
+      }
+
+      document.querySelectorAll('.nav-link[data-view]').forEach((button) => button.addEventListener('click', () => showView(button.dataset.view)));
+      document.querySelectorAll('[data-open-settings]').forEach((button) => button.addEventListener('click', () => showView('settings')));
+      document.querySelectorAll('.source-tab').forEach((button) => button.addEventListener('click', () => setSource(button.dataset.source)));
+      $('#deviceSelect').addEventListener('change', () => {
+        localStorage.setItem('gateway-device', selectedDeviceId());
+        refreshStatus();
+        if (activeSource === 'contacts' || activeSource === 'groups') loadDirectory();
+      });
+      $('#importExcel').addEventListener('click', importExcel);
+      $('#composeForm').addEventListener('submit', submitCompose);
+      $('#attachment').addEventListener('change', () => {
+        const file = $('#attachment').files[0];
+        $('#attachmentName').textContent = file ? file.name : '';
+      });
+      $('#scheduleMode').addEventListener('click', () => {
+        composeMode = composeMode === 'send' ? 'schedule' : 'send';
+        $('#scheduleBox').classList.toggle('hidden', composeMode !== 'schedule');
+        $('#scheduleMode').textContent = composeMode === 'schedule' ? '× Batal jadwal' : '▦ Jadwalkan';
+        $('#sendButton').textContent = composeMode === 'schedule' ? '▦ Simpan Jadwal' : '➤ Kirim';
+      });
+      $('#newSchedule').addEventListener('click', () => {
+        composeMode = 'schedule';
+        $('#scheduleBox').classList.remove('hidden');
+        $('#scheduleMode').textContent = '× Batal jadwal';
+        $('#sendButton').textContent = '▦ Simpan Jadwal';
+        showView('compose');
+      });
+      $('#refreshHistory').addEventListener('click', loadHistory);
+      $('#saveKey').addEventListener('click', () => {
+        sessionStorage.setItem('gateway-api-key', apiKeyInput.value.trim());
+        setFeedback(authMessage, 'API key disimpan sampai tab browser ditutup.', 'success');
+        refreshAll();
+      });
+      $('#logoutButton').addEventListener('click', () => {
+        sessionStorage.removeItem('gateway-api-key');
+        apiKeyInput.value = '';
+        $('#headerStatus').textContent = 'API key dibutuhkan';
+        $('#headerStatus').className = 'connection-pill close';
+        showView('settings');
+        setFeedback(authMessage, 'Kunci sesi dihapus dari browser.', 'success');
+      });
+      $('#addDeviceForm').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        try {
+          const result = await api('/api/devices', {
+            method: 'POST',
+            body: JSON.stringify({ name: $('#newDeviceName').value }),
+          });
+          $('#newDeviceName').value = '';
+          setFeedback($('#deviceFeedback'), `Device "${result.device.name}" dibuat. Scan QR di bawah.`, 'success');
+          await loadDevices();
+          $('#deviceSelect').value = result.device.id;
+          localStorage.setItem('gateway-device', result.device.id);
+          await refreshStatus();
+        } catch (error) {
+          setFeedback($('#deviceFeedback'), error.message, 'error');
+        }
+      });
+      $('#autoReplyForm').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        try {
+          await api('/api/auto-replies', {
+            method: 'POST',
+            body: JSON.stringify({
+              deviceId: $('#ruleDevice').value || null,
+              keyword: $('#ruleKeyword').value,
+              reply: $('#ruleReply').value,
+            }),
+          });
+          $('#ruleKeyword').value = '';
+          $('#ruleReply').value = '';
+          setFeedback($('#ruleFeedback'), 'Aturan auto-reply disimpan.', 'success');
+          await loadRules();
+        } catch (error) {
+          setFeedback($('#ruleFeedback'), error.message, 'error');
+        }
+      });
+
+      showView('compose');
+      refreshAll();
+      setInterval(refreshAll, 5000);
     </script>
   </body>
 </html>
