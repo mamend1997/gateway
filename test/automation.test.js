@@ -6,6 +6,7 @@ import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import { AutoReplyService } from '../services/autoReply.js';
 import { MessageScheduler } from '../services/scheduler.js';
+import { WhatsAppManager } from '../services/waManager.js';
 
 test('auto-reply queues one matching rule once per incoming message', async () => {
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'gateway-auto-reply-'));
@@ -58,6 +59,29 @@ test('scheduled jobs survive a scheduler restart', async () => {
     await restarted.stop();
   } finally {
     await first.stop();
+    await fs.rm(dataDir, { recursive: true, force: true });
+  }
+});
+
+test('rotating a device token persists the new secret and invalidates the old one', async () => {
+  const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'gateway-device-token-'));
+  try {
+    const manager = new WhatsAppManager({ authDir: dataDir, dataDir });
+    manager.devices.set('device-1', {
+      device: { id: 'device-1', name: 'Test' },
+      client: {},
+    });
+    manager.deviceTokens.set('device-1', 'a'.repeat(64));
+
+    const token = await manager.rotateDeviceToken('device-1');
+    const savedTokens = JSON.parse(await fs.readFile(path.join(dataDir, 'device-tokens.json'), 'utf8'));
+
+    assert.equal(token.length, 64);
+    assert.notEqual(token, 'a'.repeat(64));
+    assert.equal(savedTokens['device-1'], token);
+    assert.equal(manager.getDeviceIdForToken(token), 'device-1');
+    assert.equal(manager.getDeviceIdForToken('a'.repeat(64)), null);
+  } finally {
     await fs.rm(dataDir, { recursive: true, force: true });
   }
 });

@@ -209,6 +209,7 @@ export class WhatsAppClient extends EventEmitter {
     return {
       status: this.status,
       connected: this.isConnected(),
+      phone: this.socket?.user?.id?.split(':')[0]?.split('@')[0] ?? null,
       qr: this.qr,
       error: this.lastError,
       updatedAt: this.statusUpdatedAt,
@@ -239,7 +240,13 @@ export class WhatsAppClient extends EventEmitter {
     this.stopped = true;
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     this.reconnectTimer = null;
-    this.socket?.end(undefined);
+    const socket = this.socket;
     this.socket = null;
+    socket?.end(undefined);
+    this.status = 'close';
+    this.statusUpdatedAt = new Date().toISOString();
+    this.qr = null;
+    this.lastError = null;
+    this.emit('status', this.getStatus());
   }
 }

@@ -11,20 +11,42 @@ function readApiKey(request) {
   return request.get('x-api-key') ?? bearer ?? authorization;
 }
 
-function authenticate(expectedKey) {
+function matchesSecret(suppliedKey, expectedKey) {
+  if (typeof suppliedKey !== 'string' || typeof expectedKey !== 'string') return false;
+  const supplied = Buffer.from(suppliedKey);
+  const expected = Buffer.from(expectedKey);
+  return supplied.length === expected.length && timingSafeEqual(supplied, expected);
+}
+
+function authenticate(expectedKey, waManager) {
   return (request, response, next) => {
     const suppliedKey = readApiKey(request);
     if (!suppliedKey) {
       return response.status(401).json({ error: 'API key wajib dikirim.' });
     }
 
-    const supplied = Buffer.from(suppliedKey);
-    const expected = Buffer.from(expectedKey);
-    if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) {
-      return response.status(401).json({ error: 'API key tidak valid.' });
+    if (matchesSecret(suppliedKey, expectedKey)) {
+      request.authType = 'admin';
+      return next();
     }
-    return next();
+
+    const deviceId = waManager?.getDeviceIdForToken?.(suppliedKey);
+    if (deviceId) {
+      request.authType = 'device';
+      request.authDeviceId = deviceId;
+      return next();
+    }
+    return response.status(401).json({ error: 'API key tidak valid.' });
   };
+}
+
+function restrictDeviceTokens(request, response, next) {
+  const isSending = request.method === 'POST'
+    && ['/send-message', '/send-bulk'].includes(request.path);
+  if (request.authType === 'device' && !isSending) {
+    return response.status(403).json({ error: 'Token device hanya dapat digunakan untuk mengirim pesan.' });
+  }
+  return next();
 }
 
 const upload = multer({
@@ -99,9 +121,15 @@ function delayRange(request) {
 }
 
 function getDeviceId(request) {
-  return typeof request.body?.deviceId === 'string'
+  const requested = typeof request.body?.deviceId === 'string'
     ? request.body.deviceId
-    : request.query.deviceId ?? 'primary';
+    : typeof request.query.deviceId === 'string' ? request.query.deviceId : null;
+  if (request.authDeviceId && requested && requested !== request.authDeviceId) {
+    const error = new Error('Token ini hanya dapat mengirim melalui device pemiliknya.');
+    error.statusCode = 403;
+    throw error;
+  }
+  return request.authDeviceId ?? requested ?? 'primary';
 }
 
 function getStatus(waManager, waClient, deviceId) {
@@ -110,7 +138,8 @@ function getStatus(waManager, waClient, deviceId) {
 
 export function createApiRouter({ apiKey, queue, waClient, waManager, scheduler, autoReply }) {
   const router = Router();
-  router.use(authenticate(apiKey));
+  router.use(authenticate(apiKey, waManager));
+  router.use(restrictDeviceTokens);
 
   router.get('/status', (request, response) => {
     const deviceId = getDeviceId(request);
@@ -129,6 +158,57 @@ export function createApiRouter({ apiKey, queue, waClient, waManager, scheduler,
       if (!waManager) return response.status(501).json({ error: 'Manajemen device tidak tersedia.' });
       const result = await waManager.addDevice(String(request.body?.name ?? ''));
       return response.status(201).json({ device: { ...result.device, ...result.client.getStatus() } });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  router.patch('/devices/:id', async (request, response, next) => {
+    try {
+      if (typeof request.body?.name !== 'string') {
+        return response.status(400).json({ error: 'Nama device wajib berupa teks.' });
+      }
+      const device = await waManager?.renameDevice(request.params.id, request.body.name);
+      if (!device) return response.status(404).json({ error: 'Device tidak ditemukan.' });
+      return response.json({ device });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  router.post('/devices/:id/disconnect', async (request, response, next) => {
+    try {
+      const status = await waManager?.disconnectDevice(request.params.id);
+      if (!status) return response.status(404).json({ error: 'Device tidak ditemukan.' });
+      return response.json({ status });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  router.post('/devices/:id/reconnect', async (request, response, next) => {
+    try {
+      const status = await waManager?.reconnectDevice(request.params.id);
+      if (!status) return response.status(404).json({ error: 'Device tidak ditemukan.' });
+      return response.json({ status });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  router.get('/devices/:id/token', (request, response) => {
+    const token = waManager?.getDeviceToken(request.params.id);
+    if (!token) return response.status(404).json({ error: 'Token device tidak ditemukan.' });
+    response.set('Cache-Control', 'no-store');
+    return response.json({ token });
+  });
+
+  router.post('/devices/:id/token/rotate', async (request, response, next) => {
+    try {
+      const token = await waManager?.rotateDeviceToken(request.params.id);
+      if (!token) return response.status(404).json({ error: 'Device tidak ditemukan.' });
+      response.set('Cache-Control', 'no-store');
+      return response.json({ token });
     } catch (error) {
       return next(error);
     }
@@ -172,7 +252,7 @@ export function createApiRouter({ apiKey, queue, waClient, waManager, scheduler,
   router.post('/send-message', (request, response) => {
     const { phone, target, number, message } = request.body ?? {};
     const rawPhone = phone ?? target ?? number;
-    if (typeof rawPhone !== 'string' || (typeof message !== 'string' || !message.trim())) {
+    if (typeof rawPhone !== 'string' || typeof message !== 'string' || !message.trim()) {
       return response.status(400).json({
         error: 'Body wajib berisi phone/target/number dan message berupa teks non-kosong.',
       });
@@ -194,7 +274,7 @@ export function createApiRouter({ apiKey, queue, waClient, waManager, scheduler,
         phone: item.phone,
       });
     } catch (error) {
-      return response.status(400).json({ error: error.message });
+      return response.status(error.statusCode ?? 400).json({ error: error.message });
     }
   });
 
@@ -226,7 +306,7 @@ export function createApiRouter({ apiKey, queue, waClient, waManager, scheduler,
         ids: queued.map((item) => item.id),
       });
     } catch (error) {
-      return response.status(400).json({ error: error.message });
+      return response.status(error.statusCode ?? 400).json({ error: error.message });
     }
   });
 

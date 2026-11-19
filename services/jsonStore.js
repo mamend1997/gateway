@@ -18,7 +18,10 @@ export async function writeJson(filePath, value) {
   const current = previous.catch(() => {}).then(async () => {
     await fs.mkdir(path.dirname(filePath), { recursive: true });
     const temporaryPath = `${filePath}.${randomUUID()}.tmp`;
-    await fs.writeFile(temporaryPath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
+    await fs.writeFile(temporaryPath, `${JSON.stringify(value, null, 2)}\n`, {
+      encoding: 'utf8',
+      mode: 0o600,
+    });
     await fs.rename(temporaryPath, filePath);
   });
   pendingWrites.set(filePath, current);

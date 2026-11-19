@@ -78,3 +78,65 @@ test('protects status and queues normalized message requests using bearer auth',
   });
   assert.equal(importResponse.status, 400);
 });
+
+test('device token sends only through its owner device and cannot read admin endpoints', async (context) => {
+  const queued = [];
+  const waManager = {
+    getDeviceIdForToken: (token) => token === 'device-secret' ? 'device-1' : null,
+    getDeviceToken: (id) => id === 'device-1' ? 'device-secret' : null,
+    listDevices: () => [],
+    getStatus: () => ({ status: 'open', connected: true }),
+  };
+  const queue = {
+    enqueue(message) {
+      const item = { id: 'device-job', status: 'queued', ...message };
+      queued.push(item);
+      return item;
+    },
+    getMessages: () => [],
+  };
+  const app = express();
+  app.use(express.json());
+  app.use('/api', createApiRouter({
+    apiKey: 'admin-secret',
+    queue,
+    waClient: { getStatus: () => ({ status: 'open', connected: true }) },
+    waManager,
+  }));
+  const server = app.listen(0, '127.0.0.1');
+  context.after(() => new Promise((resolve) => server.close(resolve)));
+  await new Promise((resolve) => server.once('listening', resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  const response = await fetch(`${baseUrl}/api/send-message`, {
+    method: 'POST',
+    headers: {
+      Authorization: 'Bearer device-secret',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ target: '081234567890', message: 'OTP 1234' }),
+  });
+  assert.equal(response.status, 202);
+  assert.equal(queued[0].deviceId, 'device-1');
+
+  const forbidden = await fetch(`${baseUrl}/api/send-message`, {
+    method: 'POST',
+    headers: {
+      Authorization: 'device-secret',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ target: '081234567890', message: 'OTP', deviceId: 'device-2' }),
+  });
+  assert.equal(forbidden.status, 403);
+  assert.equal(queued.length, 1);
+
+  const adminOnly = await fetch(`${baseUrl}/api/devices`, {
+    headers: { Authorization: 'device-secret' },
+  });
+  assert.equal(adminOnly.status, 403);
+
+  const token = await fetch(`${baseUrl}/api/devices/device-1/token`, {
+    headers: { 'X-API-Key': 'admin-secret' },
+  });
+  assert.equal((await token.json()).token, 'device-secret');
+});

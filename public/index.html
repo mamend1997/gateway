@@ -82,6 +82,9 @@
       .button:disabled { cursor: wait; opacity: .65; }
       .button.secondary { color: #334155; background: #e6edf4; }
       .button.danger { color: #a52b2b; background: #fee8e6; }
+      .button.blue { background: #2563eb; }
+      .button.purple { background: #3730a3; }
+      .button.dark { background: #202b3b; }
       .button.small { min-height: 34px; padding: 6px 10px; font-size: .82rem; }
       .button.full { width: 100%; margin-top: 20px; }
       .button-row { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
@@ -105,6 +108,11 @@
       .device-info { min-width: 0; }
       .device-info h3 { margin: 0 0 5px; font-size: .98rem; }
       .device-info p { margin: 0; color: #748398; font-size: .82rem; }
+      .device-table { min-width: 1060px; }
+      .device-table td { padding: 18px 12px; }
+      .device-name { display: block; margin-bottom: 5px; color: #1d2b40; font-weight: 750; }
+      .device-meta { display: block; margin-top: 4px; color: #718096; font-size: .82rem; }
+      .device-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
       .api-row { display: flex; gap: 9px; }
       .api-row input { flex: 1; }
       .hidden { display: none !important; }
@@ -240,7 +248,15 @@
             </form>
             <p id="deviceFeedback" class="feedback" role="status"></p>
           </section>
-          <div id="deviceCards"></div>
+          <section class="card">
+            <div class="section-heading"><h2>Daftar Device</h2></div>
+            <div class="table-wrap">
+              <table class="device-table">
+                <thead><tr><th>Device</th><th>Koneksi</th><th>Action</th></tr></thead>
+                <tbody id="deviceRows"><tr><td colspan="3" class="empty">Memuat device...</td></tr></tbody>
+              </table>
+            </div>
+          </section>
           <section class="card">
             <div class="section-heading"><h2>QR device terpilih</h2><span id="deviceQrStatus" class="badge connecting">Memuat</span></div>
             <p id="deviceQrHelp" class="status-detail">Pilih device dan scan QR dari menu Perangkat tertaut di WhatsApp.</p>
@@ -392,23 +408,122 @@
         const result = await api('/api/devices');
         devices = result.devices ?? [];
         renderDeviceSelects();
-        const container = $('#deviceCards');
-        container.replaceChildren();
+        const rows = $('#deviceRows');
+        rows.replaceChildren();
+        if (!devices.length) emptyRow(rows, 3, 'Belum ada device.');
         for (const device of devices) {
-          const card = document.createElement('section');
-          card.className = 'card';
-          card.innerHTML = `<div class="device-card"><div class="device-info"><h3>${escapeHtml(device.name)}</h3><p>${device.primary ? 'Perangkat utama' : 'Device tambahan'} · ${escapeHtml(device.id)}</p></div><div class="button-row"><span class="badge ${escapeAttribute(device.status)}">${device.connected ? 'Connected' : escapeHtml(device.status)}</span><button class="button secondary small" type="button" data-select-device="${escapeAttribute(device.id)}">Pilih</button>${device.primary ? '' : `<button class="button danger small" type="button" data-remove-device="${escapeAttribute(device.id)}">Hapus</button>`}</div></div>`;
-          container.append(card);
+          const row = rows.insertRow();
+          const identity = row.insertCell();
+          const name = document.createElement('span');
+          name.className = 'device-name';
+          name.textContent = device.name;
+          const role = document.createElement('span');
+          role.className = 'device-meta';
+          role.textContent = device.primary ? 'Perangkat utama' : 'Device tambahan';
+          const id = document.createElement('span');
+          id.className = 'device-meta';
+          id.textContent = device.id;
+          identity.append(name, role, id);
+
+          const connection = row.insertCell();
+          const status = document.createElement('span');
+          status.className = `badge ${device.status}`;
+          status.textContent = device.connected ? 'Connected' : device.status;
+          const phone = document.createElement('span');
+          phone.className = 'device-meta';
+          phone.textContent = device.phone ? `WhatsApp · ${device.phone}` : 'Nomor belum terhubung';
+          connection.append(status, phone);
+
+          const actionsCell = row.insertCell();
+          const actions = document.createElement('div');
+          actions.className = 'device-actions';
+          actions.append(createDeviceButton(
+            device.connected ? 'Putuskan' : 'Sambungkan',
+            device.connected ? 'button danger small' : 'button blue small',
+            () => changeDeviceConnection(device),
+          ));
+          actions.append(createDeviceButton('Token', 'button dark small', () => copyDeviceToken(device.id)));
+          actions.append(createDeviceButton('Ganti token', 'button dark small', () => rotateDeviceToken(device.id)));
+          actions.append(createDeviceButton('Pilih', 'button purple small', () => selectDevice(device.id)));
+          actions.append(createDeviceButton('Edit', 'button blue small', () => editDevice(device)));
+          if (!device.primary) {
+            actions.append(createDeviceButton('Hapus', 'button danger small', () => removeDevice(device.id)));
+          }
+          actionsCell.append(actions);
         }
-        container.querySelectorAll('[data-select-device]').forEach((button) => button.addEventListener('click', () => {
-          $('#deviceSelect').value = button.dataset.selectDevice;
-          localStorage.setItem('gateway-device', button.dataset.selectDevice);
-          refreshStatus();
-          loadDirectory();
-        }));
-        container.querySelectorAll('[data-remove-device]').forEach((button) => button.addEventListener('click', () => removeDevice(button.dataset.removeDevice)));
         devicesLoaded = true;
         await refreshStatus();
+      }
+
+      function createDeviceButton(label, className, action) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = className;
+        button.textContent = label;
+        button.addEventListener('click', action);
+        return button;
+      }
+
+      async function selectDevice(id) {
+        $('#deviceSelect').value = id;
+        localStorage.setItem('gateway-device', id);
+        await refreshStatus();
+        if (activeSource === 'contacts' || activeSource === 'groups') await loadDirectory();
+      }
+
+      async function changeDeviceConnection(device) {
+        try {
+          const action = device.connected ? 'disconnect' : 'reconnect';
+          await api(`/api/devices/${encodeURIComponent(device.id)}/${action}`, { method: 'POST' });
+          setFeedback($('#deviceFeedback'), device.connected ? 'Device diputuskan.' : 'Permintaan sambung ulang dikirim.', 'success');
+          await loadDevices();
+        } catch (error) {
+          setFeedback($('#deviceFeedback'), error.message, 'error');
+        }
+      }
+
+      async function copyDeviceToken(id, tokenValue) {
+        try {
+          const { token } = tokenValue ? { token: tokenValue } : await api(`/api/devices/${encodeURIComponent(id)}/token`);
+          if (navigator.clipboard?.writeText && window.isSecureContext) {
+            try {
+              await navigator.clipboard.writeText(token);
+              setFeedback($('#deviceFeedback'), 'Token device disalin. Simpan token dengan aman.', 'success');
+              return;
+            } catch {
+              // Clipboard access may be blocked; show the token for manual copying.
+            }
+          }
+          const copied = window.prompt('Salin token device ini:', token) !== null;
+          setFeedback($('#deviceFeedback'), copied ? 'Token ditampilkan untuk disalin.' : 'Penyalinan token dibatalkan.', copied ? 'success' : 'error');
+        } catch (error) {
+          setFeedback($('#deviceFeedback'), error.message, 'error');
+        }
+      }
+
+      async function rotateDeviceToken(id) {
+        if (!confirm('Ganti token akan langsung membuat token lama tidak berlaku. Lanjutkan?')) return;
+        try {
+          const { token } = await api(`/api/devices/${encodeURIComponent(id)}/token/rotate`, { method: 'POST' });
+          await copyDeviceToken(id, token);
+        } catch (error) {
+          setFeedback($('#deviceFeedback'), error.message, 'error');
+        }
+      }
+
+      async function editDevice(device) {
+        const name = window.prompt('Nama device:', device.name);
+        if (name === null || !name.trim()) return;
+        try {
+          await api(`/api/devices/${encodeURIComponent(device.id)}`, {
+            method: 'PATCH',
+            body: JSON.stringify({ name: name.trim() }),
+          });
+          await loadDevices();
+          setFeedback($('#deviceFeedback'), 'Nama device diperbarui.', 'success');
+        } catch (error) {
+          setFeedback($('#deviceFeedback'), error.message, 'error');
+        }
       }
 
       async function refreshStatus() {
@@ -668,7 +783,7 @@
       }
 
       async function removeDevice(id) {
-        if (!confirm('Hapus device ini beserta sesi login lokalnya?')) return;
+        if (!confirm('Hapus device ini beserta sesi dan token per-device-nya?')) return;
         try {
           await api(`/api/devices/${encodeURIComponent(id)}`, { method: 'DELETE' });
           await loadDevices();
