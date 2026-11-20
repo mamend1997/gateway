@@ -367,6 +367,9 @@ export function createApiRouter({ apiKey, queue, waClient, waManager, scheduler,
       const deviceId = getDeviceId(request);
       const message = String(request.body?.message ?? '').trim();
       const attachments = getAttachments(request);
+      if (attachments.length > (queue.getQuotaStatus?.().limits?.perMinute ?? 10)) {
+        return response.status(400).json({ error: 'Jumlah lampiran melebihi batas pesan per menit per device.' });
+      }
       if (!message && !attachments.length) {
         return response.status(400).json({ error: 'Pesan atau lampiran wajib diisi.' });
       }
@@ -426,6 +429,9 @@ export function createApiRouter({ apiKey, queue, waClient, waManager, scheduler,
       const targets = parseTargets(request.body?.targets);
       const message = String(request.body?.message ?? '').trim();
       const attachments = getAttachments(request);
+      if (attachments.length > (queue.getQuotaStatus?.().limits?.perMinute ?? 10)) {
+        return response.status(400).json({ error: 'Jumlah lampiran melebihi batas pesan per menit per device.' });
+      }
       if (!message && !attachments.length) {
         return response.status(400).json({ error: 'Pesan atau lampiran wajib diisi.' });
       }

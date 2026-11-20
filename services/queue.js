@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { MessageHistoryStore } from './historyStore.js';
 import { MessageQuota } from './messageQuota.js';
 
@@ -148,7 +148,10 @@ export class MessageQueue {
             }
           } catch (error) {
             item.error = error.message || 'Pengiriman gagal.';
-            if (Number.isInteger(error.attachmentIndex)) item.attachmentIndex = error.attachmentIndex;
+            if (Number.isInteger(error.attachmentIndex)) {
+              item.attachmentIndex = error.attachmentIndex;
+              item.quotaUnits = Math.max(1, item.attachment.length - item.attachmentIndex);
+            }
             item.updatedAt = new Date().toISOString();
             if (error.permanent || item.attempts > this.maxRetries) {
               item.status = 'failed';
@@ -215,6 +218,7 @@ export class QueueManager {
     });
     this.duplicateWindowMs = duplicateWindowMs;
     this.recentSends = new Map();
+    this.attachmentFingerprints = new WeakMap();
     this.waManager.on('deviceRemoved', (deviceId) => {
       this.queues.get(deviceId)?.stop();
       this.queues.delete(deviceId);
@@ -245,22 +249,34 @@ export class QueueManager {
     const queue = this.getQueue(item.deviceId);
     const target = item.target ?? item.phone;
     const attachments = Array.isArray(item.attachment) ? item.attachment : item.attachment ? [item.attachment] : [];
-    const duplicateKey = `${item.deviceId}:${target}:${item.message}:${attachments.map((file) => `${file.originalName}:${file.buffer?.length ?? 0}`).join(',')}`;
+    const attachmentKey = attachments.map((file) => {
+      if (!Buffer.isBuffer(file.buffer)) return `${file.originalName}:invalid`;
+      let fingerprint = this.attachmentFingerprints.get(file.buffer);
+      if (!fingerprint) {
+        fingerprint = createHash('sha256').update(file.buffer).digest('hex');
+        this.attachmentFingerprints.set(file.buffer, fingerprint);
+      }
+      return fingerprint;
+    }).join(',');
+    const duplicateKey = `${item.deviceId}:${target}:${item.message}:${attachmentKey}`;
     const now = Date.now();
     for (const [key, timestamp] of this.recentSends) {
       if (timestamp <= now - this.duplicateWindowMs) this.recentSends.delete(key);
     }
     let blocked;
+    let dailyRemaining;
     if (this.recentSends.has(duplicateKey)) {
       blocked = { status: 'duplicate_suppressed', error: 'Pesan yang sama untuk tujuan ini baru saja dikirim.' };
     } else {
-      blocked = this.quota.reserveDaily(item.deviceId, Math.max(1, attachments.length));
-      if (blocked.allowed) {
-        blocked = null;
+      const reservation = this.quota.reserveDaily(item.deviceId, Math.max(1, attachments.length));
+      dailyRemaining = reservation.dailyRemaining;
+      if (reservation.allowed) {
         this.recentSends.set(duplicateKey, now);
         if (this.recentSends.size > 10_000) {
           this.recentSends.delete(this.recentSends.keys().next().value);
         }
+      } else {
+        blocked = reservation;
       }
     }
     const quotaUnits = Math.max(1, attachments.length);
@@ -269,7 +285,7 @@ export class QueueManager {
       attachment: attachments,
       blocked,
       quotaUnits,
-      dailyRemaining: blocked?.dailyRemaining,
+      dailyRemaining,
     });
   }
 
@@ -280,7 +296,7 @@ export class QueueManager {
   getQuotaStatus() {
     const devices = (this.waManager.listDevices?.() ?? []).map((device) => {
       const queue = this.queues.get(device.id);
-      const pendingCount = queue?.messages.filter((item) => ['queued', 'sending'].includes(item.status)).length ?? 0;
+      const pendingCount = queue?.messages.filter((item) => ['queued', 'sending', 'rate_limited'].includes(item.status)).length ?? 0;
       return {
         ...this.quota.getStatus(device.id),
         name: device.name,
