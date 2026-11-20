@@ -286,9 +286,9 @@
               <div class="field">
                 <label for="attachments">♧ &nbsp;Lampiran <span class="help" style="display:inline">(opsional)</span></label>
                 <div class="file-drop">
-                  <div><strong>Pilih hingga 5 gambar / PDF</strong><span class="help">Maks. 16 MB per file — dikirim ke semua target</span></div>
+                  <div><strong>Pilih hingga 5 gambar / PDF</strong><span class="help">File dari pilihan berikutnya akan ditambahkan. Maks. 16 MB per file — dikirim ke semua target</span></div>
                   <input id="attachments" type="file" accept="image/*,.pdf,application/pdf" multiple>
-                  <span id="attachmentNames" class="help"></span>
+                  <div class="button-row"><span id="attachmentNames" class="help"></span><button id="clearAttachments" class="button secondary small hidden" type="button">Hapus lampiran</button></div>
                 </div>
               </div>
               <div class="field">
@@ -434,6 +434,7 @@
       let composeMode = 'send';
       let modalState = null;
       let modalPreviousFocus = null;
+      let selectedAttachments = [];
 
       const rememberedApiKey = localStorage.getItem('gateway-api-key');
       apiKeyInput.value = rememberedApiKey ?? sessionStorage.getItem('gateway-api-key') ?? '';
@@ -923,7 +924,7 @@
         formData.append('minDelaySeconds', $('#minDelay').value);
         formData.append('maxDelaySeconds', $('#maxDelay').value);
         if (runAt) formData.append('runAt', runAt);
-        for (const attachment of $('#attachments').files) {
+        for (const attachment of selectedAttachments) {
           formData.append('attachments', attachment);
         }
         return formData;
@@ -937,7 +938,7 @@
         try {
           const targets = collectTargets();
           const message = $('#messageText').value.trim();
-          const attachments = [...$('#attachments').files];
+          const attachments = [...selectedAttachments];
           if (!targets.length) throw new Error('Masukkan atau pilih setidaknya satu tujuan.');
           if (!message && !attachments.length) throw new Error('Isi teks pesan atau pilih lampiran.');
           if (attachments.length > 5) throw new Error('Maksimal 5 lampiran untuk setiap pengiriman.');
@@ -957,7 +958,9 @@
           }
           $('#messageText').value = '';
           $('#attachments').value = '';
+          selectedAttachments = [];
           $('#attachmentNames').textContent = '';
+          $('#clearAttachments').classList.add('hidden');
           if (composeMode === 'schedule') {
             $('#runAt').value = '';
             loadSchedules();
@@ -1121,10 +1124,33 @@
       $('#importExcel').addEventListener('click', importExcel);
       $('#composeForm').addEventListener('submit', submitCompose);
       $('#attachments').addEventListener('change', () => {
-        const files = [...$('#attachments').files];
-        $('#attachmentNames').textContent = files.length
-          ? `${files.length} file: ${files.map((file) => file.name).join(', ')}`
+        const input = $('#attachments');
+        const files = [...input.files];
+        const fileKey = (file) => `${file.name}:${file.size}:${file.lastModified}`;
+        const existing = new Set(selectedAttachments.map(fileKey));
+        const additions = files.filter((file) => {
+          const key = fileKey(file);
+          if (existing.has(key)) return false;
+          existing.add(key);
+          return true;
+        });
+        if (selectedAttachments.length + additions.length > 5) {
+          setFeedback($('#composeFeedback'), 'Maksimal 5 lampiran. Pilihan sebelumnya tetap tersimpan.', 'error');
+          input.value = '';
+          return;
+        }
+        selectedAttachments.push(...additions);
+        input.value = '';
+        $('#attachmentNames').textContent = selectedAttachments.length
+          ? `${selectedAttachments.length} file: ${selectedAttachments.map((file) => file.name).join(', ')}`
           : '';
+        $('#clearAttachments').classList.toggle('hidden', selectedAttachments.length === 0);
+      });
+      $('#clearAttachments').addEventListener('click', () => {
+        selectedAttachments = [];
+        $('#attachments').value = '';
+        $('#attachmentNames').textContent = '';
+        $('#clearAttachments').classList.add('hidden');
       });
       $('#scheduleMode').addEventListener('click', () => {
         composeMode = composeMode === 'send' ? 'schedule' : 'send';
