@@ -28,12 +28,20 @@ export class WhatsAppClient extends EventEmitter {
     this.contacts = new Map();
     this.inactiveTargets = new Map();
     this.verifiedTargets = new Map();
+    this.pendingCredsSave = Promise.resolve();
     this.logger = pino({ level: process.env.LOG_LEVEL ?? 'warn' });
   }
 
   async start() {
     this.stopped = false;
     await fs.mkdir(this.authDir, { recursive: true });
+    const hasCredentials = await fs.access(path.join(this.authDir, 'creds.json'))
+      .then(() => true)
+      .catch((error) => {
+        if (error.code === 'ENOENT') return false;
+        throw error;
+      });
+    console.log(`WhatsApp device ${this.id}: AUTH_DIR=${this.authDir}; creds.json=${hasCredentials ? 'ada' : 'tidak ada'}.`);
     if (this.inactiveTargetsPath) {
       const savedTargets = await readJson(this.inactiveTargetsPath, {});
       const entries = Array.isArray(savedTargets)
@@ -68,7 +76,13 @@ export class WhatsAppClient extends EventEmitter {
       browser: ['WhatsApp Gateway', 'Chrome', '1.0.0'],
     });
     this.socket = socket;
-    socket.ev.on('creds.update', saveCreds);
+    socket.ev.on('creds.update', () => {
+      this.pendingCredsSave = this.pendingCredsSave
+        .then(() => saveCreds())
+        .catch((error) => {
+          this.logger.error({ err: error }, `Gagal menyimpan kredensial WhatsApp device ${this.id}.`);
+        });
+    });
     socket.ev.on('contacts.upsert', (contacts) => {
       for (const contact of contacts) {
         if (contact.id) this.contacts.set(contact.id, contact);
@@ -291,6 +305,7 @@ export class WhatsAppClient extends EventEmitter {
     const socket = this.socket;
     this.socket = null;
     socket?.end(undefined);
+    await this.pendingCredsSave;
     this.status = 'close';
     this.statusUpdatedAt = new Date().toISOString();
     this.qr = null;

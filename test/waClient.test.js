@@ -58,3 +58,23 @@ test('caches an unregistered WhatsApp number to avoid repeated checks', async ()
     await fs.rm(dataDir, { recursive: true, force: true });
   }
 });
+
+test('waits for pending credential writes before stopping the socket', async () => {
+  const client = new WhatsAppClient({
+    id: 'device-1',
+    name: 'Test',
+    authDir: '.',
+  });
+  let credentialsSaved = false;
+  client.pendingCredsSave = new Promise((resolve) => {
+    setTimeout(() => {
+      credentialsSaved = true;
+      resolve();
+    }, 10);
+  });
+  client.socket = { end() {} };
+
+  await client.stop();
+
+  assert.equal(credentialsSaved, true);
+});
