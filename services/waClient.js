@@ -199,7 +199,7 @@ export class WhatsAppClient extends EventEmitter {
     }
 
     let jid = target;
-    if (!target.endsWith('@g.us')) {
+    if (!target.endsWith('@g.us') && !target.endsWith('@lid')) {
       const rawPhone = target.replace(/@s\.whatsapp\.net$/, '');
       const phone = normalizePhone(rawPhone);
       jid = `${phone}@s.whatsapp.net`;

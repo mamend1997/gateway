@@ -57,6 +57,30 @@ test('uses a valid JID when sending to a cached bare phone number', async () => 
   ]);
 });
 
+test('sends replies to WhatsApp LID addresses without treating them as phone numbers', async () => {
+  const sent = [];
+  let phoneChecks = 0;
+  const client = new WhatsAppClient({
+    id: 'test',
+    name: 'Test',
+    authDir: '.',
+  });
+  client.status = 'open';
+  client.socket = {
+    onWhatsApp: async () => {
+      phoneChecks += 1;
+      return [];
+    },
+    sendMessage: async (jid, payload) => sent.push({ jid, payload }),
+  };
+
+  await client.sendMessage('71880690163766@lid', 'Baik, saya bantu.');
+
+  assert.equal(phoneChecks, 0);
+  assert.equal(sent[0].jid, '71880690163766@lid');
+  assert.deepEqual(sent[0].payload, { text: 'Baik, saya bantu.' });
+});
+
 test('caches an unregistered WhatsApp number to avoid repeated checks', async () => {
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'gateway-inactive-targets-'));
   try {
