@@ -1,16 +1,20 @@
 import fs from 'node:fs/promises';
+import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import makeWASocket, { DisconnectReason, useMultiFileAuthState } from '@whiskeysockets/baileys';
 import pino from 'pino';
 import QRCode from 'qrcode';
 import { normalizePhone } from './phone.js';
+import { readJson, writeJson } from './jsonStore.js';
 
 export class WhatsAppClient extends EventEmitter {
-  constructor({ id, name, authDir, adminPhone }) {
+  constructor({ id, name, authDir, dataDir, adminPhone }) {
     super();
     this.id = id;
     this.name = name;
     this.authDir = authDir;
+    const safeId = id.replace(/[^a-zA-Z0-9_-]/g, '_');
+    this.inactiveTargetsPath = dataDir ? path.join(dataDir, 'inactive-targets', `${safeId}.json`) : null;
     this.adminPhone = adminPhone?.trim();
     this.socket = null;
     this.status = 'connecting';
@@ -22,12 +26,24 @@ export class WhatsAppClient extends EventEmitter {
     this.wasConnected = false;
     this.disconnectNotice = null;
     this.contacts = new Map();
+    this.inactiveTargets = new Map();
+    this.verifiedTargets = new Map();
     this.logger = pino({ level: process.env.LOG_LEVEL ?? 'warn' });
   }
 
   async start() {
     this.stopped = false;
     await fs.mkdir(this.authDir, { recursive: true });
+    if (this.inactiveTargetsPath) {
+      const savedTargets = await readJson(this.inactiveTargetsPath, {});
+      const entries = Array.isArray(savedTargets)
+        ? savedTargets.map((phone) => [phone, Date.now()])
+        : Object.entries(savedTargets);
+      const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+      this.inactiveTargets = new Map(entries.filter(([phone, checkedAt]) => (
+        typeof phone === 'string' && Number.isFinite(checkedAt) && checkedAt > cutoff
+      )));
+    }
     try {
       await this.connect();
     } catch (error) {
@@ -142,7 +158,7 @@ export class WhatsAppClient extends EventEmitter {
     return this.sendMessage(phone, message);
   }
 
-  async sendMessage(target, message, attachment) {
+  async sendMessage(target, message, attachments, startIndex = 0) {
     if (!this.isConnected() || !this.socket) {
       const error = new Error('WhatsApp belum terhubung.');
       error.permanent = false;
@@ -150,36 +166,68 @@ export class WhatsAppClient extends EventEmitter {
     }
 
     let jid = target;
-    if (!target.endsWith('@g.us') && !target.endsWith('@s.whatsapp.net')) {
-      const phone = normalizePhone(target);
-      const [result] = await this.socket.onWhatsApp(phone);
-      if (!result?.exists) {
-        const error = new Error('Nomor tujuan tidak terdaftar di WhatsApp.');
+    if (!target.endsWith('@g.us')) {
+      const rawPhone = target.replace(/@s\.whatsapp\.net$/, '');
+      const phone = normalizePhone(rawPhone);
+      const inactiveAt = this.inactiveTargets.get(phone);
+      if (inactiveAt && Date.now() - inactiveAt < 24 * 60 * 60 * 1000) {
+        const error = new Error('Nomor tujuan sebelumnya dinyatakan tidak terdaftar di WhatsApp.');
         error.permanent = true;
         throw error;
       }
-      jid = result.jid;
+      if (inactiveAt) this.inactiveTargets.delete(phone);
+      const verifiedAt = this.verifiedTargets.get(phone);
+      if (!verifiedAt || Date.now() - verifiedAt > 24 * 60 * 60 * 1000) {
+        const [result] = await this.socket.onWhatsApp(phone);
+        if (!result?.exists) {
+          this.inactiveTargets.set(phone, Date.now());
+          if (this.inactiveTargets.size > 10_000) {
+            this.inactiveTargets.delete(this.inactiveTargets.keys().next().value);
+          }
+          if (this.inactiveTargetsPath) {
+            try {
+              await writeJson(this.inactiveTargetsPath, Object.fromEntries(this.inactiveTargets));
+            } catch (error) {
+              this.logger.error({ err: error }, 'Gagal menyimpan cache nomor WhatsApp tidak aktif.');
+            }
+          }
+          const error = new Error('Nomor tujuan tidak terdaftar di WhatsApp.');
+          error.permanent = true;
+          throw error;
+        }
+        this.verifiedTargets.set(phone, Date.now());
+        jid = result.jid ?? `${phone}@s.whatsapp.net`;
+      }
     }
 
-    if (target.endsWith('@s.whatsapp.net') && !target.endsWith('@g.us')) {
-      jid = target;
+    const files = Array.isArray(attachments) ? attachments : attachments?.buffer ? [attachments] : [];
+    if (!files.length) {
+      await this.socket.sendMessage(jid, { text: message });
+      return;
     }
 
-    const payload = attachment?.buffer
-      ? attachment.mimetype === 'application/pdf'
+    for (let index = startIndex; index < files.length; index += 1) {
+      const attachment = files[index];
+      const caption = index === 0 ? message || undefined : undefined;
+      const payload = attachment.mimetype === 'application/pdf'
         ? {
             document: attachment.buffer,
             mimetype: attachment.mimetype,
             fileName: attachment.originalName,
-            caption: message || undefined,
+            caption,
           }
         : {
             image: attachment.buffer,
             mimetype: attachment.mimetype,
-            caption: message || undefined,
-          }
-      : { text: message };
-    await this.socket.sendMessage(jid, payload);
+            caption,
+          };
+      try {
+        await this.socket.sendMessage(jid, payload);
+      } catch (error) {
+        error.attachmentIndex = index;
+        throw error;
+      }
+    }
   }
 
   async getGroups() {

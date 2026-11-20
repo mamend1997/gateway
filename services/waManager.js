@@ -48,6 +48,7 @@ export class WhatsAppManager extends EventEmitter {
     const client = new WhatsAppClient({
       ...device,
       authDir: authPath,
+      dataDir: this.dataDir,
       adminPhone: this.adminPhone,
     });
     this.devices.set(device.id, { device, client });

@@ -3,7 +3,8 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="theme-color" content="#087d73">
+    <meta name="theme-color" content="#2563eb">
+    <link id="appFavicon" rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%232563eb'/%3E%3Ctext x='50%25' y='55%25' text-anchor='middle' font-family='Arial' font-weight='700' font-size='38' fill='white'%3EW%3C/text%3E%3C/svg%3E">
     <title>WhatsApp Gateway</title>
     <style>
       :root {
@@ -120,6 +121,15 @@
       .toast { padding: 13px 15px; border: 1px solid #cbd5e1; border-radius: 12px; color: #23344b; background: white; box-shadow: 0 12px 30px #17233826; font-size: .88rem; }
       .toast.success { border-color: #9ce0b7; color: #12643a; background: #effcf4; }
       .toast.error { border-color: #f0b5b0; color: #9f2520; background: #fff3f1; }
+      .modal-overlay { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; padding: 18px; background: #17233880; backdrop-filter: blur(3px); }
+      .modal-card { width: min(460px, 100%); padding: 24px; border: 1px solid #e3eaf1; border-radius: 18px; background: white; box-shadow: 0 24px 70px #10203340; }
+      .modal-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+      .modal-header h2 { margin: 0; color: #172338; font-size: 1.12rem; }
+      .modal-close { display: grid; width: 34px; height: 34px; flex: 0 0 auto; place-items: center; border: 0; border-radius: 10px; color: #65758a; background: #f1f5f9; font-size: 1.25rem; }
+      .modal-description { margin: 13px 0 18px; color: #64748b; font-size: .9rem; line-height: 1.6; }
+      .modal-actions { display: flex; justify-content: flex-end; gap: 9px; margin-top: 21px; }
+      .modal-input-feedback { min-height: 18px; margin: 7px 0 0; color: #b42318; font-size: .82rem; }
+      .modal-token { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: .84rem; }
       @media (max-width: 980px) {
         .sidebar { width: 220px; }
         .main { width: calc(100% - 220px); margin-left: 220px; }
@@ -139,13 +149,69 @@
         .two-col, .form-row { grid-template-columns: 1fr; }
         .source-tabs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       }
+      :root { background: #edf3ff; }
+      body { background: linear-gradient(135deg, #f3f7ff 0%, #e8f0ff 48%, #f8faff 100%); background-attachment: fixed; }
+      .sidebar { background: linear-gradient(155deg, #172554 0%, #1d4ed8 55%, #2563eb 100%); box-shadow: 5px 0 28px #173a7a26; }
+      .brand-mark { overflow: hidden; border-color: #bfdbfe; background: #ffffff20; }
+      .brand-mark img { width: 100%; height: 100%; object-fit: cover; }
+      .nav-link { border-radius: 12px; }
+      .nav-link:hover { background: #ffffff20; }
+      .nav-link.active { color: #1d4ed8; background: #eff6ff; box-shadow: 0 8px 20px #102e6b35; }
+      .main { color: #172554; }
+      .card { border-color: #dbe7fb; border-radius: 20px; box-shadow: 0 12px 32px #1e3a8a0d; }
+      .card + .card { margin-top: 20px; }
+      .button { background: linear-gradient(110deg, #2563eb, #4f46e5); box-shadow: 0 5px 12px #2563eb24; }
+      .button:hover { filter: brightness(1.04); transform: translateY(-1px); }
+      .button.secondary { color: #1d4ed8; background: #e8f0ff; box-shadow: none; }
+      .button.blue { background: linear-gradient(110deg, #2563eb, #3b82f6); }
+      .button.purple { background: linear-gradient(110deg, #4f46e5, #7c3aed); }
+      .button.dark { background: linear-gradient(110deg, #263b61, #334e7e); }
+      .button.danger { color: #b42318; background: #fee8e6; box-shadow: none; }
+      .source-tabs { background: #edf3ff; }
+      .source-tab.active { color: #1d4ed8; }
+      input:focus, select:focus, textarea:focus { border-color: #4f7ff0; box-shadow: 0 0 0 3px #3b82f626; }
+      .file-drop { border-color: #b7c9ed; background: linear-gradient(145deg, #f8fbff, #f0f5ff); }
+      .connection-pill.open, .badge.open, .badge.sent { color: #147547; background: #dcfce9; }
+      .toast { border-color: #d7e3f7; border-radius: 14px; box-shadow: 0 15px 35px #18346b1c; }
+      .modal-card { border-color: #d8e4f8; box-shadow: 0 24px 70px #102d6650; }
+      .badge.rate_limited, .badge.quota_exceeded, .badge.duplicate_suppressed { color: #9a5b08; background: #fff3cd; }
+      .table-wrap { border-radius: 12px; }
+      th { color: #64799a; }
+      .api-row { flex-wrap: wrap; }
+      .api-row input { min-width: 180px; }
     </style>
   </head>
   <body>
     <div id="toastRegion" class="toast-region" aria-live="polite" aria-atomic="false"></div>
+    <div id="appModal" class="modal-overlay hidden" role="presentation">
+      <section id="modalPanel" class="modal-card" role="dialog" aria-modal="true" aria-labelledby="modalTitle" aria-describedby="modalDescription" tabindex="-1">
+        <div class="modal-header">
+          <h2 id="modalTitle"></h2>
+          <button id="modalClose" class="modal-close" type="button" aria-label="Tutup pop-up">×</button>
+        </div>
+        <p id="modalDescription" class="modal-description"></p>
+        <div id="modalInputGroup" class="field hidden">
+          <label id="modalInputLabel" for="modalInput"></label>
+          <input id="modalInput" maxlength="64" autocomplete="off">
+          <p id="modalInputFeedback" class="modal-input-feedback" aria-live="polite"></p>
+        </div>
+        <div id="modalTokenGroup" class="field hidden">
+          <label for="modalTokenInput">Token device</label>
+          <div class="api-row">
+            <input id="modalTokenInput" class="modal-token" type="text" readonly autocomplete="off">
+            <button id="modalCopyToken" class="button secondary small" type="button">Salin</button>
+          </div>
+          <p id="modalTokenFeedback" class="help" aria-live="polite"></p>
+        </div>
+        <div class="modal-actions">
+          <button id="modalCancel" class="button secondary" type="button">Batal</button>
+          <button id="modalConfirm" class="button" type="button">OK</button>
+        </div>
+      </section>
+    </div>
     <div class="app">
       <aside class="sidebar">
-        <div class="brand"><span class="brand-mark">W</span><span class="brand-name">Gateway</span></div>
+        <div class="brand"><span id="brandMark" class="brand-mark">W</span><span class="brand-name">Gateway</span></div>
         <nav class="nav" aria-label="Navigasi utama">
           <button class="nav-link" data-view="devices" aria-label="Devices"><span class="nav-icon">▣</span><span class="nav-label">Devices</span></button>
           <button class="nav-link active" data-view="compose" aria-label="Pesan Masal"><span class="nav-icon">➤</span><span class="nav-label">Pesan Masal</span></button>
@@ -190,6 +256,7 @@
                 <div id="source-manual" class="source-panel">
                   <textarea id="manualTargets" class="manual-targets" placeholder="Contoh: 081234567890, 085712345678..."></textarea>
                   <p class="help">Pisahkan nomor dengan koma (,) atau baris baru. Nomor 08xxx otomatis dinormalisasi.</p>
+                  <p class="help">Personalisasi batch: gunakan <code>{name}</code> atau <code>{phone}</code> pada pesan.</p>
                 </div>
                 <div id="source-contacts" class="source-panel hidden">
                   <div id="contactList" class="directory-list"><p class="help">Pilih device untuk memuat kontak.</p></div>
@@ -215,19 +282,19 @@
                 <textarea id="messageText" placeholder="Halo kak, info terbaru untuk Anda..."></textarea>
               </div>
               <div class="field">
-                <label for="attachment">♧ &nbsp;Lampiran <span class="help" style="display:inline">(opsional)</span></label>
+                <label for="attachments">♧ &nbsp;Lampiran <span class="help" style="display:inline">(opsional)</span></label>
                 <div class="file-drop">
-                  <div><strong>Klik untuk lampirkan gambar / PDF</strong><span class="help">Maks. 16 MB — dikirim ke semua target</span></div>
-                  <input id="attachment" type="file" accept="image/*,.pdf,application/pdf">
-                  <span id="attachmentName" class="help"></span>
+                  <div><strong>Pilih hingga 5 gambar / PDF</strong><span class="help">Maks. 16 MB per file — dikirim ke semua target</span></div>
+                  <input id="attachments" type="file" accept="image/*,.pdf,application/pdf" multiple>
+                  <span id="attachmentNames" class="help"></span>
                 </div>
               </div>
               <div class="field">
                 <label for="minDelay">◷ &nbsp;Jeda Acak per Pesan (detik)</label>
                 <div class="delay-row">
-                  <input id="minDelay" type="number" min="0" max="3600" value="4" required aria-label="Jeda minimum">
+                  <input id="minDelay" type="number" min="0" max="3600" value="3" required aria-label="Jeda minimum">
                   <span class="separator">s/d</span>
-                  <input id="maxDelay" type="number" min="0" max="3600" value="8" required aria-label="Jeda maksimum">
+                  <input id="maxDelay" type="number" min="0" max="3600" value="7" required aria-label="Jeda maksimum">
                 </div>
                 <p class="help">Jeda acak antar pesan untuk mengatur laju antrean; kirim hanya ke penerima yang setuju menerima pesan.</p>
               </div>
@@ -314,6 +381,27 @@
             <p id="authMessage" class="feedback" role="status">API key hanya disimpan pada sesi browser ini.</p>
           </section>
           <section class="card">
+            <h2>Logo &amp; favicon</h2>
+            <p class="help">Gambar yang dipilih akan digunakan pada logo sidebar dan ikon tab browser. Format PNG, JPG, atau ICO, maksimal 1 MB.</p>
+            <div class="api-row field">
+              <input id="faviconFile" type="file" accept="image/png,image/jpeg,image/x-icon,.ico">
+              <button id="saveFavicon" class="button" type="button">Simpan logo</button>
+              <button id="resetFavicon" class="button secondary" type="button">Kembalikan bawaan</button>
+            </div>
+            <p id="faviconFeedback" class="feedback" role="status"></p>
+          </section>
+          <section class="card">
+            <h2>Balasan AI otomatis (Gemini)</h2>
+            <p id="aiReplyStatus" class="feedback" role="status">Periksa konfigurasi AI.</p>
+            <p class="help">Atur <code>AI_AUTO_REPLY=true</code>, <code>GEMINI_API_KEY</code>, dan opsional <code>GEMINI_MODEL</code> di environment Railway. Aturan kata kunci yang cocok akan didahulukan; AI hanya membalas chat pribadi, bukan grup.</p>
+          </section>
+          <section class="card">
+            <h2>Kuota &amp; keamanan pengiriman</h2>
+            <p id="quotaStatus" class="status-detail">Memuat kuota device...</p>
+            <div id="securityWarnings" aria-live="polite"></div>
+            <p class="help">Batas per device dan jumlah jeda dapat disesuaikan melalui environment Railway. Kuota harian dihitung berdasarkan UTC.</p>
+          </section>
+          <section class="card">
             <h2>Catatan koneksi</h2>
             <p class="status-detail">Kredensial WhatsApp berada di volume AUTH_DIR. Jadwal dan aturan auto-reply berada di DATA_DIR dan perlu volume persisten terpisah pada Railway.</p>
             <p class="status-detail">Gunakan API key melalui backend aplikasi Anda; jangan menanamnya di frontend publik.</p>
@@ -326,6 +414,7 @@
       const $ = (selector) => document.querySelector(selector);
       const apiKeyInput = $('#apiKey');
       const authMessage = $('#authMessage');
+      const defaultFaviconUrl = $('#appFavicon').href;
       const pages = {
         compose: ['Pesan Masal', 'Kirim pesan ke banyak nomor atau grup sekaligus.'],
         devices: ['Devices', 'Kelola device dan status koneksi WhatsApp.'],
@@ -338,6 +427,8 @@
       let devicesLoaded = false;
       let activeSource = 'manual';
       let composeMode = 'send';
+      let modalState = null;
+      let modalPreviousFocus = null;
 
       apiKeyInput.value = sessionStorage.getItem('gateway-api-key') ?? '';
 
@@ -352,6 +443,139 @@
         toast.textContent = message;
         $('#toastRegion').append(toast);
         window.setTimeout(() => toast.remove(), 5000);
+      }
+
+      function presentModal(options, resolve = null) {
+        modalPreviousFocus = document.activeElement;
+        modalState = { mode: options.mode, resolve };
+        $('#modalTitle').textContent = options.title;
+        $('#modalDescription').textContent = options.description;
+        $('#modalInputGroup').classList.toggle('hidden', options.mode !== 'edit');
+        $('#modalTokenGroup').classList.toggle('hidden', options.mode !== 'token');
+        $('#modalInputLabel').textContent = options.inputLabel ?? '';
+        $('#modalInput').value = options.inputValue ?? '';
+        $('#modalInputFeedback').textContent = '';
+        $('#modalTokenInput').value = options.token ?? '';
+        $('#modalTokenFeedback').textContent = options.mode === 'token'
+          ? 'Simpan token baru dan perbarui token di aplikasi eksternal.'
+          : '';
+        $('#modalCancel').classList.toggle('hidden', options.mode === 'token');
+        $('#modalConfirm').textContent = options.confirmLabel ?? 'OK';
+        $('#modalConfirm').className = options.confirmClass ?? 'button';
+        $('#appModal').classList.remove('hidden');
+        window.requestAnimationFrame(() => {
+          (options.mode === 'edit' ? $('#modalInput') : $('#modalConfirm')).focus();
+          if (options.mode === 'edit') $('#modalInput').select();
+        });
+      }
+
+      function requestModal(options) {
+        return new Promise((resolve) => presentModal(options, resolve));
+      }
+
+      function closeModal(result = null) {
+        const state = modalState;
+        modalState = null;
+        $('#appModal').classList.add('hidden');
+        if (state?.resolve) state.resolve(result);
+        if (modalPreviousFocus instanceof HTMLElement) modalPreviousFocus.focus();
+        modalPreviousFocus = null;
+      }
+
+      function cancelModal() {
+        closeModal(modalState?.mode === 'confirm' ? false : null);
+      }
+
+      async function copyModalToken() {
+        const input = $('#modalTokenInput');
+        try {
+          if (!navigator.clipboard?.writeText || !window.isSecureContext) throw new Error('Clipboard tidak tersedia.');
+          await navigator.clipboard.writeText(input.value);
+          $('#modalTokenFeedback').textContent = 'Token berhasil disalin. Perbarui token di aplikasi eksternal.';
+          $('#modalCopyToken').textContent = 'Tersalin';
+          notify('Token device berhasil disalin.', 'success');
+        } catch {
+          input.focus();
+          input.select();
+          $('#modalTokenFeedback').textContent = 'Penyalinan otomatis tidak tersedia. Token sudah dipilih; salin secara manual.';
+        }
+      }
+
+      async function refreshFavicon() {
+        const response = await fetch('/favicon', { cache: 'no-store' });
+        if (response.status === 404) {
+          $('#appFavicon').href = defaultFaviconUrl;
+          $('#brandMark').textContent = 'W';
+          return;
+        }
+        if (!response.ok) throw new Error(`Logo gagal dimuat (${response.status}).`);
+        const url = `/favicon?v=${Date.now()}`;
+        $('#appFavicon').href = url;
+        const image = document.createElement('img');
+        image.src = url;
+        image.alt = 'Logo Gateway';
+        $('#brandMark').replaceChildren(image);
+      }
+
+      async function loadAiReplyStatus() {
+        try {
+          const status = await api('/api/ai/status');
+          const node = $('#aiReplyStatus');
+          node.className = `feedback ${status.ready ? 'success' : status.enabled ? 'error' : ''}`;
+          node.textContent = !status.enabled
+            ? 'Nonaktif. Atur AI_AUTO_REPLY=true dan GEMINI_API_KEY di Railway.'
+            : !status.configured
+              ? 'Aktif tetapi GEMINI_API_KEY belum dikonfigurasi.'
+              : `Aktif — ${status.provider} (${status.model}).`;
+        } catch (error) {
+          $('#aiReplyStatus').textContent = error.message;
+        }
+      }
+
+      async function loadQuotaStatus() {
+        try {
+          const result = await api('/api/quota');
+          const devices = result.devices ?? [];
+          $('#quotaStatus').textContent = devices.length
+            ? devices.map((device) => `${device.name}: ${device.dailyRemaining}/${device.dailyLimit} pesan hari ini; ${device.minuteRemaining}/${device.perMinuteLimit} tersedia per menit; antrean ${device.pendingCount ?? 0}.`).join(' ')
+            : 'Belum ada device terdaftar.';
+          const warnings = $('#securityWarnings');
+          warnings.replaceChildren();
+          for (const warning of result.warnings ?? []) {
+            const note = document.createElement('div');
+            note.className = 'warning';
+            note.textContent = warning;
+            warnings.append(note);
+          }
+        } catch (error) {
+          $('#quotaStatus').textContent = error.message;
+        }
+      }
+
+      async function saveFavicon() {
+        const file = $('#faviconFile').files[0];
+        if (!file) return setFeedback($('#faviconFeedback'), 'Pilih file logo PNG, JPG, atau ICO terlebih dahulu.', 'error');
+        if (file.size > 1024 * 1024) return setFeedback($('#faviconFeedback'), 'Ukuran logo maksimal 1 MB.', 'error');
+        const formData = new FormData();
+        formData.append('favicon', file);
+        try {
+          const result = await api('/api/settings/favicon', { method: 'POST', body: formData });
+          await refreshFavicon();
+          setFeedback($('#faviconFeedback'), result.message, 'success');
+        } catch (error) {
+          setFeedback($('#faviconFeedback'), error.message, 'error');
+        }
+      }
+
+      async function resetFavicon() {
+        try {
+          const result = await api('/api/settings/favicon', { method: 'DELETE' });
+          await refreshFavicon();
+          $('#faviconFile').value = '';
+          setFeedback($('#faviconFeedback'), result.message, 'success');
+        } catch (error) {
+          setFeedback($('#faviconFeedback'), error.message, 'error');
+        }
       }
 
       async function api(url, options = {}) {
@@ -375,6 +599,10 @@
         if (name === 'schedules') loadSchedules();
         if (name === 'autoreply') loadRules();
         if (name === 'devices') loadDevices().catch((error) => notify(error.message, 'error'));
+        if (name === 'settings') {
+          loadAiReplyStatus();
+          loadQuotaStatus();
+        }
       }
 
       function setStatus(status) {
@@ -524,9 +752,14 @@
               // Clipboard access may be blocked; show the token for manual copying.
             }
           }
-          const copied = window.prompt('Salin token device ini:', token) !== null;
-          setFeedback($('#deviceFeedback'), copied ? 'Token ditampilkan untuk disalin.' : 'Penyalinan token dibatalkan.', copied ? 'success' : 'error');
-          notify(copied ? `Token untuk device ${id} ditampilkan.` : 'Penyalinan token dibatalkan.', copied ? 'success' : 'error');
+          const device = devices.find((item) => item.id === id);
+          presentModal({
+            mode: 'token',
+            title: `Token ${device?.name ?? id}`,
+            description: 'Salin token untuk digunakan pada aplikasi eksternal. Jaga token ini agar tidak diketahui pihak lain.',
+            token,
+            confirmLabel: 'Selesai',
+          });
         } catch (error) {
           setFeedback($('#deviceFeedback'), error.message, 'error');
           notify(error.message, 'error');
@@ -534,10 +767,25 @@
       }
 
       async function rotateDeviceToken(id) {
-        if (!confirm('Ganti token akan langsung membuat token lama tidak berlaku. Lanjutkan?')) return;
+        const device = devices.find((item) => item.id === id);
+        if (!device) return notify('Informasi device tidak ditemukan. Muat ulang halaman Devices.', 'error');
+        const confirmed = await requestModal({
+          mode: 'confirm',
+          title: 'Ganti token device?',
+          description: `Token lama untuk "${device.name}" akan langsung tidak berlaku. Integrasi eksternal yang memakai token lama harus diperbarui.`,
+          confirmLabel: 'Ganti token',
+          confirmClass: 'button danger',
+        });
+        if (!confirmed) return;
         try {
           const { token } = await api(`/api/devices/${encodeURIComponent(id)}/token/rotate`, { method: 'POST' });
-          await copyDeviceToken(id, token);
+          presentModal({
+            mode: 'token',
+            title: `Token baru ${device.name}`,
+            description: 'Token lama sudah tidak berlaku. Salin token baru ini dan perbarui konfigurasi aplikasi eksternal.',
+            token,
+            confirmLabel: 'Selesai',
+          });
           notify('Token lama sudah tidak berlaku. Salin token baru lalu perbarui aplikasi eksternal.', 'success');
         } catch (error) {
           setFeedback($('#deviceFeedback'), error.message, 'error');
@@ -546,9 +794,15 @@
       }
 
       async function editDevice(device) {
-        const name = window.prompt('Nama device:', device.name);
+        const name = await requestModal({
+          mode: 'edit',
+          title: 'Edit nama device',
+          description: 'Ubah nama device yang ditampilkan pada dashboard.',
+          inputLabel: 'Nama device',
+          inputValue: device.name,
+          confirmLabel: 'Simpan perubahan',
+        });
         if (name === null) return;
-        if (!name.trim()) return notify('Nama device tidak boleh kosong.', 'error');
         try {
           await api(`/api/devices/${encodeURIComponent(device.id)}`, {
             method: 'PATCH',
@@ -581,6 +835,10 @@
           if ($('#view-history').classList.contains('active')) await loadHistory();
           if ($('#view-schedules').classList.contains('active')) await loadSchedules();
           if ($('#view-autoreply').classList.contains('active')) await loadRules();
+          if ($('#view-settings').classList.contains('active')) {
+            await loadAiReplyStatus();
+            await loadQuotaStatus();
+          }
         } catch (error) {
           if ($('#authMessage')) setFeedback(authMessage, error.message, 'error');
           $('#headerStatus').textContent = error.message.includes('API key') ? 'API key dibutuhkan' : 'API tidak tersedia';
@@ -655,8 +913,9 @@
         formData.append('minDelaySeconds', $('#minDelay').value);
         formData.append('maxDelaySeconds', $('#maxDelay').value);
         if (runAt) formData.append('runAt', runAt);
-        const attachment = $('#attachment').files[0];
-        if (attachment) formData.append('attachment', attachment);
+        for (const attachment of $('#attachments').files) {
+          formData.append('attachments', attachment);
+        }
         return formData;
       }
 
@@ -668,10 +927,13 @@
         try {
           const targets = collectTargets();
           const message = $('#messageText').value.trim();
-          const attachment = $('#attachment').files[0];
+          const attachments = [...$('#attachments').files];
           if (!targets.length) throw new Error('Masukkan atau pilih setidaknya satu tujuan.');
-          if (!message && !attachment) throw new Error('Isi teks pesan atau pilih lampiran.');
-          if (attachment && attachment.size > 16 * 1024 * 1024) throw new Error('Ukuran lampiran maksimal 16 MB.');
+          if (!message && !attachments.length) throw new Error('Isi teks pesan atau pilih lampiran.');
+          if (attachments.length > 5) throw new Error('Maksimal 5 lampiran untuk setiap pengiriman.');
+          if (attachments.some((attachment) => attachment.size > 16 * 1024 * 1024)) {
+            throw new Error('Ukuran setiap lampiran maksimal 16 MB.');
+          }
           if (Number($('#minDelay').value) > Number($('#maxDelay').value)) throw new Error('Jeda minimum tidak boleh melebihi jeda maksimum.');
           const runAt = composeMode === 'schedule' ? new Date($('#runAt').value).toISOString() : '';
           if (composeMode === 'schedule' && !$('#runAt').value) throw new Error('Pilih waktu jadwal.');
@@ -679,10 +941,13 @@
           const result = await api(endpoint, { method: 'POST', body: composerFormData(targets, message, runAt) });
           setFeedback(feedback, composeMode === 'schedule'
             ? `Jadwal berhasil disimpan untuk ${targets.length} tujuan.`
-            : `${result.queued} pesan masuk ke antrean.`, 'success');
+            : `${result.queued} masuk antrean; ${result.rateLimited ?? 0} dibatasi per menit; ${result.quotaExceeded ?? 0} melewati kuota harian; ${result.duplicatesSuppressed ?? 0} duplikat dilewati.`, 'success');
+          if (targets.length > 100) {
+            notify(`Batch berisi ${targets.length} tujuan. Periksa kuota dan pastikan semua penerima menyetujui pesan.`, '');
+          }
           $('#messageText').value = '';
-          $('#attachment').value = '';
-          $('#attachmentName').textContent = '';
+          $('#attachments').value = '';
+          $('#attachmentNames').textContent = '';
           if (composeMode === 'schedule') {
             $('#runAt').value = '';
             loadSchedules();
@@ -707,7 +972,7 @@
               new Date(item.createdAt).toLocaleString(),
               devices.find((device) => device.id === item.deviceId)?.name ?? item.deviceId ?? 'Perangkat utama',
               item.phone,
-              `${item.preview}${item.hasAttachment ? ' [Lampiran]' : ''}`,
+              `${item.preview}${item.hasAttachment ? ` [${item.attachmentCount || 1} lampiran]` : ''}`,
               item.status,
               item.attempts,
               item.error ?? '—',
@@ -845,9 +1110,11 @@
       });
       $('#importExcel').addEventListener('click', importExcel);
       $('#composeForm').addEventListener('submit', submitCompose);
-      $('#attachment').addEventListener('change', () => {
-        const file = $('#attachment').files[0];
-        $('#attachmentName').textContent = file ? file.name : '';
+      $('#attachments').addEventListener('change', () => {
+        const files = [...$('#attachments').files];
+        $('#attachmentNames').textContent = files.length
+          ? `${files.length} file: ${files.map((file) => file.name).join(', ')}`
+          : '';
       });
       $('#scheduleMode').addEventListener('click', () => {
         composeMode = composeMode === 'send' ? 'schedule' : 'send';
@@ -867,6 +1134,34 @@
         sessionStorage.setItem('gateway-api-key', apiKeyInput.value.trim());
         setFeedback(authMessage, 'API key disimpan sampai tab browser ditutup.', 'success');
         refreshAll();
+      });
+      $('#saveFavicon').addEventListener('click', saveFavicon);
+      $('#resetFavicon').addEventListener('click', resetFavicon);
+      $('#modalClose').addEventListener('click', cancelModal);
+      $('#modalCancel').addEventListener('click', cancelModal);
+      $('#appModal').addEventListener('click', (event) => {
+        if (event.target === $('#appModal')) cancelModal();
+      });
+      $('#modalConfirm').addEventListener('click', () => {
+        if (modalState?.mode === 'edit') {
+          const name = $('#modalInput').value.trim();
+          if (!name) {
+            $('#modalInputFeedback').textContent = 'Nama device tidak boleh kosong.';
+            $('#modalInput').focus();
+            return;
+          }
+          closeModal(name);
+          return;
+        }
+        closeModal(modalState?.mode === 'confirm' ? true : null);
+      });
+      $('#modalCopyToken').addEventListener('click', copyModalToken);
+      document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && !$('#appModal').classList.contains('hidden')) cancelModal();
+        if (event.key === 'Enter' && modalState?.mode === 'edit' && document.activeElement === $('#modalInput')) {
+          event.preventDefault();
+          $('#modalConfirm').click();
+        }
       });
       $('#logoutButton').addEventListener('click', () => {
         sessionStorage.removeItem('gateway-api-key');
@@ -914,6 +1209,7 @@
       });
 
       showView('compose');
+      refreshFavicon().catch((error) => console.error('Gagal memuat logo aplikasi:', error));
       refreshAll();
       setInterval(refreshAll, 5000);
     </script>

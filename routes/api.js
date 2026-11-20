@@ -1,8 +1,10 @@
+import fs from 'node:fs/promises';
 import { timingSafeEqual } from 'node:crypto';
 import path from 'node:path';
 import { Router } from 'express';
 import multer from 'multer';
 import readXlsxFile from 'read-excel-file/node';
+import { writeJson } from '../services/jsonStore.js';
 import { normalizePhone } from '../services/phone.js';
 
 function readApiKey(request) {
@@ -51,7 +53,7 @@ function restrictDeviceTokens(request, response, next) {
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 16 * 1024 * 1024, files: 1 },
+  limits: { fileSize: 16 * 1024 * 1024, files: 5 },
   fileFilter: (_request, file, callback) => {
     if (file.mimetype.startsWith('image/') || file.mimetype === 'application/pdf') {
       callback(null, true);
@@ -61,6 +63,11 @@ const upload = multer({
   },
 });
 
+const uploadAttachments = upload.fields([
+  { name: 'attachments', maxCount: 5 },
+  { name: 'attachment', maxCount: 1 },
+]);
+
 const uploadExcel = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 16 * 1024 * 1024, files: 1 },
@@ -69,6 +76,18 @@ const uploadExcel = multer({
       callback(null, true);
     } else {
       callback(new Error('Impor hanya mendukung file Excel .xlsx.'));
+    }
+  },
+});
+
+const faviconUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 1024 * 1024, files: 1 },
+  fileFilter: (_request, file, callback) => {
+    if (['image/png', 'image/jpeg', 'image/x-icon', 'image/vnd.microsoft.icon'].includes(file.mimetype)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Logo hanya mendukung file PNG, JPG, atau ICO.'));
     }
   },
 });
@@ -111,13 +130,32 @@ function parseTargets(input) {
 }
 
 function delayRange(request) {
-  const minSeconds = Number(request.body?.minDelaySeconds ?? 4);
-  const maxSeconds = Number(request.body?.maxDelaySeconds ?? 8);
+  const minSeconds = Number(request.body?.minDelaySeconds ?? 3);
+  const maxSeconds = Number(request.body?.maxDelaySeconds ?? 7);
   if (!Number.isFinite(minSeconds) || !Number.isFinite(maxSeconds)
       || minSeconds < 0 || maxSeconds < minSeconds || maxSeconds > 3600) {
     throw new Error('Jeda harus antara 0 sampai 3600 detik, dan batas minimum tidak boleh melebihi maksimum.');
   }
   return { minDelayMs: Math.round(minSeconds * 1000), maxDelayMs: Math.round(maxSeconds * 1000) };
+}
+
+function personalizeMessage(message, target) {
+  const phone = target.id.replace(/@(?:s\.whatsapp\.net|g\.us)$/, '');
+  return message
+    .replace(/\{name\}/gi, target.label)
+    .replace(/\{phone\}/gi, phone);
+}
+
+function getAttachments(request) {
+  const files = [
+    ...(request.files?.attachment ?? []),
+    ...(request.files?.attachments ?? []),
+  ];
+  return files.map((file) => ({
+    buffer: file.buffer,
+    mimetype: file.mimetype,
+    originalName: file.originalname,
+  }));
 }
 
 function getDeviceId(request) {
@@ -136,7 +174,7 @@ function getStatus(waManager, waClient, deviceId) {
   return waManager?.getStatus(deviceId) ?? waClient.getStatus();
 }
 
-export function createApiRouter({ apiKey, queue, waClient, waManager, scheduler, autoReply }) {
+export function createApiRouter({ apiKey, queue, waClient, waManager, scheduler, autoReply, aiReply, dataDir }) {
   const router = Router();
   router.use(authenticate(apiKey, waManager));
   router.use(restrictDeviceTokens);
@@ -249,6 +287,43 @@ export function createApiRouter({ apiKey, queue, waClient, waManager, scheduler,
     response.json({ messages: queue.getMessages() });
   });
 
+  router.get('/quota', (_request, response) => {
+    response.json(queue.getQuotaStatus?.() ?? { devices: [], warnings: [] });
+  });
+
+  router.get('/ai/status', (_request, response) => {
+    response.json(aiReply?.getStatus() ?? {
+      enabled: false,
+      configured: false,
+      ready: false,
+      provider: 'Gemini',
+    });
+  });
+
+  router.post('/settings/favicon', faviconUpload.single('favicon'), async (request, response, next) => {
+    if (!request.file) return response.status(400).json({ error: 'Pilih file logo terlebih dahulu.' });
+    if (!dataDir) return response.status(500).json({ error: 'Penyimpanan DATA_DIR belum dikonfigurasi.' });
+    try {
+      await writeJson(path.join(dataDir, 'favicon.json'), {
+        mimetype: request.file.mimetype,
+        base64: request.file.buffer.toString('base64'),
+      });
+      return response.json({ message: 'Logo dan favicon berhasil diperbarui.' });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  router.delete('/settings/favicon', async (_request, response, next) => {
+    if (!dataDir) return response.status(500).json({ error: 'Penyimpanan DATA_DIR belum dikonfigurasi.' });
+    try {
+      await fs.rm(path.join(dataDir, 'favicon.json'), { force: true });
+      return response.json({ message: 'Logo dan favicon dikembalikan ke bawaan.' });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
   router.post('/send-message', (request, response) => {
     const { phone, target, number, message } = request.body ?? {};
     const rawPhone = phone ?? target ?? number;
@@ -267,6 +342,14 @@ export function createApiRouter({ apiKey, queue, waClient, waManager, scheduler,
         message: message.trim(),
         deviceId: getDeviceId(request),
       });
+      if (item.status !== 'queued') {
+        return response.status(429).json({
+          error: item.error,
+          id: item.id,
+          status: item.status,
+          dailyRemaining: item.dailyRemaining,
+        });
+      }
       return response.status(202).json({
         message: 'Pesan ditambahkan ke antrean.',
         id: item.id,
@@ -278,31 +361,35 @@ export function createApiRouter({ apiKey, queue, waClient, waManager, scheduler,
     }
   });
 
-  router.post('/send-bulk', upload.single('attachment'), (request, response) => {
+  router.post('/send-bulk', uploadAttachments, (request, response) => {
     try {
       const targets = parseTargets(request.body?.targets);
       const deviceId = getDeviceId(request);
       const message = String(request.body?.message ?? '').trim();
-      if (!message && !request.file) {
+      const attachments = getAttachments(request);
+      if (!message && !attachments.length) {
         return response.status(400).json({ error: 'Pesan atau lampiran wajib diisi.' });
       }
       const { minDelayMs, maxDelayMs } = delayRange(request);
-      const attachment = request.file ? {
-        buffer: request.file.buffer,
-        mimetype: request.file.mimetype,
-        originalName: request.file.originalname,
-      } : undefined;
       const queued = targets.map((target) => queue.enqueue({
         target: target.id,
         deviceId,
-        message,
-        attachment,
+        message: personalizeMessage(message, target),
+        attachment: attachments,
         minDelayMs,
         maxDelayMs,
+        isBulk: true,
       }));
+      const counts = queued.reduce((result, item) => {
+        result[item.status] = (result[item.status] ?? 0) + 1;
+        return result;
+      }, {});
       return response.status(202).json({
-        message: 'Pesan massal masuk antrean.',
-        queued: queued.length,
+        message: 'Pengiriman massal diproses sesuai kuota dan pemeriksaan duplikasi.',
+        queued: counts.queued ?? 0,
+        rateLimited: counts.rate_limited ?? 0,
+        quotaExceeded: counts.quota_exceeded ?? 0,
+        duplicatesSuppressed: counts.duplicate_suppressed ?? 0,
         ids: queued.map((item) => item.id),
       });
     } catch (error) {
@@ -333,12 +420,13 @@ export function createApiRouter({ apiKey, queue, waClient, waManager, scheduler,
     response.json({ schedules: scheduler?.getJobs() ?? [] });
   });
 
-  router.post('/schedules', upload.single('attachment'), async (request, response) => {
+  router.post('/schedules', uploadAttachments, async (request, response) => {
     if (!scheduler) return response.status(501).json({ error: 'Penjadwalan belum aktif.' });
     try {
       const targets = parseTargets(request.body?.targets);
       const message = String(request.body?.message ?? '').trim();
-      if (!message && !request.file) {
+      const attachments = getAttachments(request);
+      if (!message && !attachments.length) {
         return response.status(400).json({ error: 'Pesan atau lampiran wajib diisi.' });
       }
       const job = await scheduler.add({
@@ -347,11 +435,7 @@ export function createApiRouter({ apiKey, queue, waClient, waManager, scheduler,
         message,
         runAt: request.body?.runAt,
         ...delayRange(request),
-        attachment: request.file ? {
-          buffer: request.file.buffer,
-          mimetype: request.file.mimetype,
-          originalName: request.file.originalname,
-        } : null,
+        attachments,
       });
       return response.status(201).json({ schedule: job });
     } catch (error) {
@@ -400,16 +484,23 @@ export function createApiRouter({ apiKey, queue, waClient, waManager, scheduler,
     return response.json({ message: 'Aturan dihapus.' });
   });
 
-  router.use((error, _request, response, _next) => {
+  router.use((error, request, response, _next) => {
     if (error instanceof multer.MulterError) {
+      const isFaviconUpload = request.path === '/settings/favicon';
+      const isExcelUpload = request.path === '/import-excel';
       return response.status(error.code === 'LIMIT_FILE_SIZE' ? 413 : 400).json({
         error: error.code === 'LIMIT_FILE_SIZE'
-          ? 'Ukuran lampiran maksimal 16 MB.'
+          ? isFaviconUpload ? 'Ukuran logo maksimal 1 MB.' : 'Ukuran setiap lampiran maksimal 16 MB.'
+          : error.code === 'LIMIT_FILE_COUNT' || error.code === 'LIMIT_UNEXPECTED_FILE'
+            ? isFaviconUpload || isExcelUpload
+              ? 'Endpoint ini hanya menerima satu file.'
+              : 'Maksimal 5 lampiran untuk setiap pengiriman.'
           : error.message,
       });
     }
     if (error.message === 'Lampiran hanya mendukung gambar atau PDF.'
-        || error.message === 'Impor hanya mendukung file Excel .xlsx.') {
+        || error.message === 'Impor hanya mendukung file Excel .xlsx.'
+        || error.message === 'Logo hanya mendukung file PNG, JPG, atau ICO.') {
       return response.status(400).json({ error: error.message });
     }
     console.error('Kesalahan API:', error);

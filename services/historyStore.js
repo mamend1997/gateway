@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { readJson, writeJson } from './jsonStore.js';
 
-const interruptedStatus = new Set(['queued', 'sending']);
+const interruptedStatus = new Set(['queued', 'sending', 'rate_limited']);
 
 export class MessageHistoryStore {
   constructor({ dataDir, limit = 1000 }) {

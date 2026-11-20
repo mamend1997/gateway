@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import path from 'node:path';
+import fs from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import cors from 'cors';
 import express from 'express';
@@ -8,15 +9,25 @@ import { QueueManager } from './services/queue.js';
 import { WhatsAppManager } from './services/waManager.js';
 import { MessageScheduler } from './services/scheduler.js';
 import { AutoReplyService } from './services/autoReply.js';
+import { GeminiAutoReplyService } from './services/aiAutoReply.js';
+import { readJson } from './services/jsonStore.js';
 
 const currentDir = path.dirname(fileURLToPath(import.meta.url));
 const port = Number.parseInt(process.env.PORT ?? '3000', 10);
 const apiKey = process.env.API_KEY?.trim();
 const authDir = path.resolve(currentDir, process.env.AUTH_DIR ?? './auth_info');
 const dataDir = path.resolve(currentDir, process.env.DATA_DIR ?? './data');
-const minDelayMs = Number.parseInt(process.env.MIN_SEND_DELAY_MS ?? '2000', 10);
-const maxDelayMs = Number.parseInt(process.env.MAX_SEND_DELAY_MS ?? '4000', 10);
+const minDelayMs = Number.parseInt(process.env.MIN_SEND_DELAY_MS ?? '3000', 10);
+const maxDelayMs = Number.parseInt(process.env.MAX_SEND_DELAY_MS ?? '7000', 10);
 const maxRetries = Number.parseInt(process.env.MAX_RETRIES ?? '2', 10);
+const aiReplyEnabled = process.env.AI_AUTO_REPLY === 'true';
+const maxMessagesPerMinute = Number.parseInt(process.env.MAX_MESSAGES_PER_MINUTE ?? '10', 10);
+const maxMessagesPerDay = Number.parseInt(process.env.MAX_MESSAGES_PER_DAY ?? '100', 10);
+const duplicateWindowMs = Number.parseInt(process.env.DUPLICATE_WINDOW_MS ?? '300000', 10);
+const batchCooldownEvery = Number.parseInt(process.env.BATCH_COOLDOWN_EVERY ?? '25', 10);
+const batchCooldownMinMs = Number.parseInt(process.env.BATCH_COOLDOWN_MIN_MS ?? '25000', 10);
+const batchCooldownMaxMs = Number.parseInt(process.env.BATCH_COOLDOWN_MAX_MS ?? '45000', 10);
+const autoReplyCooldownMs = Number.parseInt(process.env.AUTO_REPLY_COOLDOWN_MS ?? '600000', 10);
 
 if (!apiKey || apiKey === 'ganti-dengan-token-acak-yang-panjang') {
   throw new Error('API_KEY wajib diatur di environment sebelum aplikasi dijalankan.');
@@ -29,6 +40,17 @@ if (!Number.isInteger(minDelayMs) || !Number.isInteger(maxDelayMs) || minDelayMs
 }
 if (!Number.isInteger(maxRetries) || maxRetries < 0 || maxRetries > 10) {
   throw new Error('MAX_RETRIES harus berupa angka antara 0 dan 10.');
+}
+if (!Number.isInteger(maxMessagesPerMinute) || maxMessagesPerMinute < 1
+    || !Number.isInteger(maxMessagesPerDay) || maxMessagesPerDay < 1) {
+  throw new Error('Batas pengiriman per menit dan per hari harus berupa bilangan bulat positif.');
+}
+if (!Number.isInteger(duplicateWindowMs) || duplicateWindowMs < 0
+    || !Number.isInteger(batchCooldownEvery) || batchCooldownEvery < 0
+    || !Number.isInteger(batchCooldownMinMs) || !Number.isInteger(batchCooldownMaxMs)
+    || batchCooldownMinMs < 0 || batchCooldownMaxMs < batchCooldownMinMs
+    || !Number.isInteger(autoReplyCooldownMs) || autoReplyCooldownMs < 0) {
+  throw new Error('Pengaturan cooldown, deduplikasi, atau jeda batch tidak valid.');
 }
 
 const app = express();
@@ -58,13 +80,43 @@ const queue = new QueueManager({
   minDelayMs,
   maxDelayMs,
   maxRetries,
+  maxMessagesPerMinute,
+  maxMessagesPerDay,
+  duplicateWindowMs,
+  batchCooldownEvery,
+  batchCooldownMinMs,
+  batchCooldownMaxMs,
 });
 const scheduler = new MessageScheduler({ dataDir, queueManager: queue });
-const autoReply = new AutoReplyService({ dataDir, waManager, queueManager: queue });
+const autoReply = new AutoReplyService({
+  dataDir,
+  waManager,
+  queueManager: queue,
+  replyCooldownMs: autoReplyCooldownMs,
+});
+const aiReply = new GeminiAutoReplyService({
+  apiKey: process.env.GEMINI_API_KEY,
+  model: process.env.GEMINI_MODEL ?? 'gemini-2.5-flash',
+  systemPrompt: process.env.AI_SYSTEM_PROMPT,
+  enabled: aiReplyEnabled,
+  waManager,
+  queueManager: queue,
+  autoReply,
+});
 
-app.use('/api', createApiRouter({ apiKey, queue, waManager, scheduler, autoReply }));
+app.use('/api', createApiRouter({ apiKey, queue, waManager, scheduler, autoReply, aiReply, dataDir }));
 app.get('/', (_request, response) => {
   response.sendFile(path.join(currentDir, 'public', 'index.html'));
+});
+app.get('/favicon', async (_request, response, next) => {
+  try {
+    const favicon = await readJson(path.join(dataDir, 'favicon.json'), null);
+    if (!favicon?.mimetype || !favicon?.base64) return response.sendStatus(404);
+    response.set('Cache-Control', 'no-store');
+    return response.type(favicon.mimetype).send(Buffer.from(favicon.base64, 'base64'));
+  } catch (error) {
+    return next(error);
+  }
 });
 
 await queue.start();

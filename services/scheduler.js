@@ -28,11 +28,12 @@ export class MessageScheduler {
     await this.processDue();
   }
 
-  async add({ deviceId, targets, message, runAt, minDelayMs, maxDelayMs, attachment }) {
+  async add({ deviceId, targets, message, runAt, minDelayMs, maxDelayMs, attachment, attachments }) {
     const time = Date.parse(runAt);
     if (!Number.isFinite(time) || time <= Date.now()) {
       throw new Error('Waktu jadwal harus berada di masa depan.');
     }
+    const files = Array.isArray(attachments) ? attachments : attachment ? [attachment] : [];
     const job = {
       id: randomUUID(),
       deviceId,
@@ -41,11 +42,11 @@ export class MessageScheduler {
       runAt: new Date(time).toISOString(),
       minDelayMs,
       maxDelayMs,
-      attachment: attachment ? {
-        base64: attachment.buffer.toString('base64'),
-        mimetype: attachment.mimetype,
-        originalName: attachment.originalName,
-      } : null,
+      attachments: files.map((file) => ({
+        base64: file.buffer.toString('base64'),
+        mimetype: file.mimetype,
+        originalName: file.originalName,
+      })),
       status: 'scheduled',
       createdAt: new Date().toISOString(),
       error: null,
@@ -77,20 +78,26 @@ export class MessageScheduler {
         job.status = 'processing';
         await this.persist();
         try {
-          const attachment = job.attachment
-            ? {
-                ...job.attachment,
-                buffer: Buffer.from(job.attachment.base64, 'base64'),
-              }
-            : undefined;
+          const attachments = Array.isArray(job.attachments)
+            ? job.attachments.map((file) => ({
+                ...file,
+                buffer: Buffer.from(file.base64, 'base64'),
+              }))
+            : job.attachment
+              ? [{
+                  ...job.attachment,
+                  buffer: Buffer.from(job.attachment.base64, 'base64'),
+                }]
+              : [];
           for (const target of job.targets) {
             this.queueManager.enqueue({
               deviceId: job.deviceId,
               target: target.id,
               message: job.message,
-              attachment,
+              attachment: attachments,
               minDelayMs: job.minDelayMs,
               maxDelayMs: job.maxDelayMs,
+              isBulk: true,
             });
           }
           job.status = 'queued';
@@ -110,8 +117,8 @@ export class MessageScheduler {
   }
 
   toPublicJob(job) {
-    const { attachment, ...publicJob } = job;
-    return { ...publicJob, hasAttachment: Boolean(attachment) };
+    const { attachment, attachments, ...publicJob } = job;
+    return { ...publicJob, hasAttachment: Boolean(attachments?.length || attachment) };
   }
 
   async stop() {

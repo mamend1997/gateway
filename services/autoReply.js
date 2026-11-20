@@ -2,7 +2,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { readJson, writeJson } from './jsonStore.js';
 
-function getMessageText(message) {
+export function getMessageText(message) {
   const content = message.message ?? {};
   return content.conversation
     ?? content.extendedTextMessage?.text
@@ -13,12 +13,15 @@ function getMessageText(message) {
 }
 
 export class AutoReplyService {
-  constructor({ dataDir, waManager, queueManager }) {
+  constructor({ dataDir, waManager, queueManager, replyCooldownMs = 10 * 60 * 1000 }) {
     this.filePath = path.join(dataDir, 'auto-replies.json');
+    this.cooldownPath = path.join(dataDir, 'auto-reply-cooldowns.json');
     this.waManager = waManager;
     this.queueManager = queueManager;
+    this.replyCooldownMs = replyCooldownMs;
     this.rules = [];
     this.recentMessages = new Set();
+    this.replyCooldowns = new Map();
     this.waManager.on('message', ({ deviceId, message }) => {
       this.handleMessage(deviceId, message).catch((error) => {
         console.error('Gagal memproses auto-reply:', error);
@@ -28,6 +31,10 @@ export class AutoReplyService {
 
   async start() {
     this.rules = await readJson(this.filePath, []);
+    const savedCooldowns = await readJson(this.cooldownPath, {});
+    const cutoff = Date.now() - this.replyCooldownMs;
+    this.replyCooldowns = new Map(Object.entries(savedCooldowns)
+      .filter(([, sentAt]) => Number.isFinite(sentAt) && sentAt > cutoff));
   }
 
   async add({ deviceId, keyword, reply }) {
@@ -98,18 +105,38 @@ export class AutoReplyService {
     if (this.recentMessages.size > 2000) {
       this.recentMessages.delete(this.recentMessages.values().next().value);
     }
-    const rule = this.rules.find((item) => (
-      item.enabled
-      && (!item.deviceId || item.deviceId === deviceId)
-      && text.includes(item.keyword.toLocaleLowerCase())
-    ));
+    const rule = this.findMatchingRule(deviceId, text);
     if (!rule) return;
-    this.queueManager.enqueue({
+    if (!this.canReply(deviceId, remoteJid)) return;
+    const queued = this.queueManager.enqueue({
       deviceId,
       target: remoteJid,
       message: rule.reply,
       autoReplyRuleId: rule.id,
     });
+    if (queued.status === 'queued') await this.recordReply(deviceId, remoteJid);
+  }
+
+  findMatchingRule(deviceId, text) {
+    return this.rules.find((item) => (
+      item.enabled
+      && (!item.deviceId || item.deviceId === deviceId)
+      && text.includes(item.keyword.toLocaleLowerCase())
+    ));
+  }
+
+  canReply(deviceId, target) {
+    const sentAt = this.replyCooldowns.get(`${deviceId}:${target}`);
+    return !sentAt || Date.now() - sentAt >= this.replyCooldownMs;
+  }
+
+  async recordReply(deviceId, target) {
+    const now = Date.now();
+    this.replyCooldowns.set(`${deviceId}:${target}`, now);
+    for (const [key, sentAt] of this.replyCooldowns) {
+      if (now - sentAt >= this.replyCooldownMs) this.replyCooldowns.delete(key);
+    }
+    await writeJson(this.cooldownPath, Object.fromEntries(this.replyCooldowns));
   }
 
   async persist() {

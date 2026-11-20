@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import { AutoReplyService } from '../services/autoReply.js';
+import { GeminiAutoReplyService } from '../services/aiAutoReply.js';
 import { MessageHistoryStore } from '../services/historyStore.js';
 import { MessageScheduler } from '../services/scheduler.js';
 import { WhatsAppManager } from '../services/waManager.js';
@@ -17,7 +18,7 @@ test('auto-reply queues one matching rule once per incoming message', async () =
     const service = new AutoReplyService({
       dataDir,
       waManager: manager,
-      queueManager: { enqueue: (item) => queued.push(item) },
+      queueManager: { enqueue: (item) => { queued.push(item); return { status: 'queued' }; } },
     });
     await service.start();
     await service.add({ deviceId: 'primary', keyword: 'Harga', reply: 'Silakan cek katalog.' });
@@ -28,6 +29,10 @@ test('auto-reply queues one matching rule once per incoming message', async () =
 
     await service.handleMessage('primary', incoming);
     await service.handleMessage('primary', incoming);
+    await service.handleMessage('primary', {
+      ...incoming,
+      key: { ...incoming.key, id: 'message-2' },
+    });
 
     assert.equal(queued.length, 1);
     assert.equal(queued[0].target, '6281234567890@s.whatsapp.net');
@@ -35,6 +40,53 @@ test('auto-reply queues one matching rule once per incoming message', async () =
   } finally {
     await fs.rm(dataDir, { recursive: true, force: true });
   }
+});
+
+test('Gemini auto-reply sends one private-chat reply and respects keyword rules', async () => {
+  const manager = new EventEmitter();
+  const queued = [];
+  let requests = 0;
+  const service = new GeminiAutoReplyService({
+    apiKey: 'test-gemini-key',
+    enabled: true,
+    waManager: manager,
+    autoReply: {
+      findMatchingRule: (_deviceId, text) => text.includes('human'),
+      canReply: () => true,
+      recordReply() {},
+    },
+    queueManager: {
+      enqueue(item) {
+        queued.push(item);
+        return { status: 'queued' };
+      },
+    },
+    fetchImpl: async (url, options) => {
+      requests += 1;
+      assert.match(url, /models\/gemini-2\.5-flash:generateContent$/);
+      assert.equal(options.headers['x-goog-api-key'], 'test-gemini-key');
+      return Response.json({
+        candidates: [{ content: { parts: [{ text: 'Tentu, saya bantu.' }] } }],
+      });
+    },
+  });
+
+  await service.handleMessage('device-1', {
+    key: { id: 'inbound-1', remoteJid: '6281234567890@s.whatsapp.net' },
+    message: { conversation: 'Halo' },
+  });
+  await service.handleMessage('device-1', {
+    key: { id: 'inbound-2', remoteJid: '6281234567890@s.whatsapp.net' },
+    message: { conversation: 'Need a human' },
+  });
+  await service.handleMessage('device-1', {
+    key: { id: 'inbound-group', remoteJid: 'group@g.us' },
+    message: { conversation: 'Halo' },
+  });
+
+  assert.equal(requests, 1);
+  assert.equal(queued.length, 1);
+  assert.equal(queued[0].message, 'Tentu, saya bantu.');
 });
 
 test('scheduled jobs survive a scheduler restart', async () => {
@@ -50,6 +102,10 @@ test('scheduled jobs survive a scheduler restart', async () => {
       runAt: new Date(Date.now() + 60_000).toISOString(),
       minDelayMs: 1000,
       maxDelayMs: 2000,
+      attachments: [
+        { buffer: Buffer.from('one'), mimetype: 'image/png', originalName: 'one.png' },
+        { buffer: Buffer.from('two'), mimetype: 'application/pdf', originalName: 'two.pdf' },
+      ],
     });
     await first.stop();
 
@@ -57,6 +113,7 @@ test('scheduled jobs survive a scheduler restart', async () => {
     await restarted.start();
     assert.equal(restarted.getJobs()[0].id, job.id);
     assert.equal(restarted.getJobs()[0].status, 'scheduled');
+    assert.equal(JSON.parse(await fs.readFile(path.join(dataDir, 'schedules.json'), 'utf8'))[0].attachments.length, 2);
     await restarted.stop();
   } finally {
     await first.stop();
