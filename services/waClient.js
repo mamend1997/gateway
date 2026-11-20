@@ -183,6 +183,7 @@ export class WhatsAppClient extends EventEmitter {
     if (!target.endsWith('@g.us')) {
       const rawPhone = target.replace(/@s\.whatsapp\.net$/, '');
       const phone = normalizePhone(rawPhone);
+      jid = `${phone}@s.whatsapp.net`;
       const inactiveAt = this.inactiveTargets.get(phone);
       if (inactiveAt && Date.now() - inactiveAt < 24 * 60 * 60 * 1000) {
         const error = new Error('Nomor tujuan sebelumnya dinyatakan tidak terdaftar di WhatsApp.');

@@ -30,6 +30,33 @@ test('sends multiple media files in order with the text captioned once', async (
   assert.equal(sent[1].payload.caption, undefined);
 });
 
+test('uses a valid JID when sending to a cached bare phone number', async () => {
+  const sent = [];
+  let checks = 0;
+  const client = new WhatsAppClient({
+    id: 'test',
+    name: 'Test',
+    authDir: '.',
+  });
+  client.status = 'open';
+  client.socket = {
+    onWhatsApp: async (phone) => {
+      checks += 1;
+      return [{ exists: true, jid: `${phone}@s.whatsapp.net` }];
+    },
+    sendMessage: async (jid, payload) => sent.push({ jid, payload }),
+  };
+
+  await client.sendMessage('081234567890', 'Pesan pertama');
+  await client.sendMessage('081234567890', 'Pesan kedua');
+
+  assert.equal(checks, 1);
+  assert.deepEqual(sent.map(({ jid }) => jid), [
+    '6281234567890@s.whatsapp.net',
+    '6281234567890@s.whatsapp.net',
+  ]);
+});
+
 test('caches an unregistered WhatsApp number to avoid repeated checks', async () => {
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'gateway-inactive-targets-'));
   try {
