@@ -42,7 +42,7 @@ Salin `.env.example` menjadi `.env` dan atur:
 | `PORT` | Port HTTP; Railway menyediakan nilainya otomatis. |
 | `API_KEY` | Wajib. Kunci admin untuk dashboard dan seluruh pengelolaan API. |
 | `AUTH_DIR` | Folder kredensial semua device Baileys; arahkan ke volume persisten pada Railway. |
-| `DATA_DIR` | Penyimpanan daftar device, token per-device, jadwal, aturan/cooldown auto-reply, kuota, cache nomor tidak aktif, logo, dan riwayat. Gunakan volume persisten pada Railway. |
+| `DATA_DIR` | Penyimpanan daftar device, token per-device, jadwal, aturan/cooldown auto-reply, kotak masuk, kuota, cache nomor tidak aktif, logo, dan riwayat. Gunakan volume persisten pada Railway. |
 | `ADMIN_PHONE` | Opsional, nomor admin format internasional. Setelah koneksi pulih, gateway mencoba mengirim notifikasi bahwa koneksi sempat terputus. |
 | `CORS_ORIGIN` | Origin web yang boleh memanggil API, dipisahkan koma. Default `*`; untuk produksi, batasi ke origin aplikasi Anda. |
 | `MIN_SEND_DELAY_MS` / `MAX_SEND_DELAY_MS` | Batas jeda acak antar pesan. Default 3000–7000 ms. |
@@ -132,6 +132,7 @@ const result = await response.json();
 - Pesan massal dapat menyertakan hingga 5 gambar/PDF (masing-masing maksimal 16 MB). File dikirim sebagai pesan media terpisah; teks menjadi caption file pertama. Jeda batch mengatur laju antrean.
 - Gunakan `{name}` dan `{phone}` untuk personalisasi pesan massal. Spintax/pengacakan variasi untuk menyamarkan pola pesan tidak disediakan; kirim hanya pesan relevan kepada penerima yang menyetujuinya.
 - **Jadwal Pesan** menyimpan pengiriman satu kali ke waktu mendatang. Jadwal yang tertunda diproses kembali setelah restart jika `DATA_DIR` persisten.
+- **Kotak Masuk** menampilkan hingga 1000 pesan masuk terbaru beserta nama pengirim/device dan menyediakan balasan dari web melalui antrean device yang menerima pesan. Data pesan masuk disimpan di `DATA_DIR/inbox.json`.
 - **Auto Reply** mencocokkan kata kunci secara tidak peka huruf besar/kecil dan membalas pesan masuk yang berisi kata tersebut. Aturan dapat ditujukan ke semua device atau satu device; setiap kontak dibatasi cooldown.
 - **Balasan AI Gemini** (opsional) membalas chat pribadi yang tidak cocok dengan aturan kata kunci. Set `AI_AUTO_REPLY=true` dan isi `GEMINI_API_KEY`; balasan AI melewati antrean dan cooldown yang sama.
 - **Pengamanan pengiriman** mencatat status `rate_limited`, `quota_exceeded`, dan `duplicate_suppressed`; kuota per-device disimpan di `DATA_DIR/message-quotas.json`. Jumlah pesan yang masih mengantre besar atau kuota habis ditampilkan di Pengaturan. Nomor yang tidak terdaftar dicache agar tidak terus dicek/dikirimi.
@@ -149,6 +150,8 @@ API tambahan (memerlukan `API_KEY` admin):
 | `GET /api/devices/:id/token` | Membaca token device untuk disalin (hanya API admin) |
 | `POST /api/devices/:id/token/rotate` | Mengganti token device (hanya API admin; token lama langsung tidak berlaku) |
 | `GET /api/quota` | Sisa kuota dan peringatan keamanan per device |
+| `GET /api/inbox` | Membaca pesan masuk terbaru (API admin) |
+| `POST /api/inbox/:messageId/reply` (`{"message":"..."}`) | Membalas pesan masuk melalui device asal (API admin) |
 | `GET /api/ai/status` | Status konfigurasi Gemini tanpa mengekspos API key |
 | `POST`, `DELETE /api/settings/favicon` | Mengganti atau mengembalikan logo/favicon (API admin) |
 | `POST /api/send-bulk` | Antrekan daftar tujuan sebagai batch |

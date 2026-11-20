@@ -105,6 +105,22 @@
       th, td { padding: 12px 10px; border-bottom: 1px solid #edf1f5; text-align: left; vertical-align: middle; font-size: .86rem; }
       th { color: #718096; font-size: .77rem; text-transform: uppercase; letter-spacing: .045em; }
       .empty { padding: 28px 12px; color: #8794a5; text-align: center; }
+      .inbox-layout { display: grid; grid-template-columns: minmax(250px, .75fr) minmax(0, 1.25fr); gap: 18px; align-items: start; }
+      .inbox-list { display: grid; gap: 8px; max-height: 68vh; overflow-y: auto; }
+      .inbox-entry { display: grid; gap: 5px; width: 100%; padding: 12px; border: 1px solid #e4eaf2; border-radius: 12px; color: #26354a; background: #fff; text-align: left; }
+      .inbox-entry.active { border-color: #4f7ff0; background: #f0f5ff; }
+      .inbox-entry strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .inbox-entry span, .inbox-entry small { overflow: hidden; color: #718096; text-overflow: ellipsis; white-space: nowrap; }
+      .inbox-entry small { font-size: .75rem; }
+      .inbox-thread { min-height: 360px; }
+      .inbox-thread-heading { margin-bottom: 12px; }
+      .inbox-thread-heading h3 { margin: 0 0 4px; font-size: 1rem; }
+      .inbox-thread-heading p { margin: 0; color: #718096; font-size: .82rem; }
+      .inbox-messages { display: grid; align-content: start; gap: 9px; min-height: 230px; max-height: 52vh; overflow-y: auto; padding: 12px; border-radius: 14px; background: #f3f6fb; }
+      .inbox-message { max-width: 85%; padding: 10px 12px; border-radius: 13px; background: white; box-shadow: 0 2px 6px #20334b0a; }
+      .inbox-message.outgoing { justify-self: end; background: #e8f0ff; }
+      .inbox-message p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+      .inbox-message small { display: block; margin-top: 6px; color: #718096; font-size: .72rem; }
       .device-card { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
       .device-info { min-width: 0; }
       .device-info h3 { margin: 0 0 5px; font-size: .98rem; }
@@ -149,6 +165,9 @@
         .top-actions { flex-direction: column; align-items: flex-end; }
         .card { padding: 18px; }
         .two-col, .form-row { grid-template-columns: 1fr; }
+        .inbox-layout { grid-template-columns: 1fr; }
+        .inbox-list { max-height: 260px; }
+        .inbox-messages { max-height: 44vh; }
         .source-tabs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       }
       :root { background: #edf3ff; }
@@ -217,6 +236,7 @@
         <nav class="nav" aria-label="Navigasi utama">
           <button class="nav-link" data-view="devices" aria-label="Devices"><span class="nav-icon">▣</span><span class="nav-label">Devices</span></button>
           <button class="nav-link active" data-view="compose" aria-label="Pesan Masal"><span class="nav-icon">➤</span><span class="nav-label">Pesan Masal</span></button>
+          <button class="nav-link" data-view="inbox" aria-label="Kotak Masuk"><span class="nav-icon">✉</span><span class="nav-label">Kotak Masuk</span></button>
           <button class="nav-link" data-view="schedules" aria-label="Jadwal Pesan"><span class="nav-icon">▦</span><span class="nav-label">Jadwal Pesan</span></button>
           <button class="nav-link" data-view="autoreply" aria-label="Auto Reply"><span class="nav-icon">▤</span><span class="nav-label">Auto Reply</span></button>
           <button class="nav-link" data-view="history" aria-label="Riwayat Pesan"><span class="nav-icon">◷</span><span class="nav-label">Riwayat Pesan</span></button>
@@ -339,6 +359,35 @@
           </section>
         </section>
 
+        <section id="view-inbox" class="page-view">
+          <div class="section-heading">
+            <div><h2>Kotak Masuk</h2><p class="subtitle">Lihat pesan masuk dan balas melalui device WhatsApp penerima.</p></div>
+            <button id="refreshInbox" class="button secondary small" type="button">Muat ulang</button>
+          </div>
+          <div class="inbox-layout">
+            <section class="card">
+              <h2>Pesan terbaru</h2>
+              <p id="inboxFeedback" class="feedback" role="status"></p>
+              <div id="inboxList" class="inbox-list"><p class="empty">Memuat pesan...</p></div>
+            </section>
+            <section class="card inbox-thread">
+              <div class="inbox-thread-heading">
+                <h3 id="inboxContact">Pilih pesan masuk</h3>
+                <p id="inboxContactMeta">Balasan akan dikirim melalui device asal pesan.</p>
+              </div>
+              <div id="inboxMessages" class="inbox-messages"><p class="empty">Pilih kontak untuk melihat pesan.</p></div>
+              <form id="inboxReplyForm" class="field hidden">
+                <label for="inboxReplyText">Balas pesan</label>
+                <textarea id="inboxReplyText" maxlength="4000" placeholder="Tulis balasan..." required></textarea>
+                <div class="button-row" style="margin-top:10px">
+                  <button id="inboxReplyButton" class="button" type="submit">Kirim balasan</button>
+                  <span id="inboxReplyFeedback" class="help" role="status"></span>
+                </div>
+              </form>
+            </section>
+          </div>
+        </section>
+
         <section id="view-schedules" class="page-view">
           <div class="section-heading">
             <div><h2>Jadwal Pesan</h2><p class="subtitle">Jadwal disimpan di penyimpanan persisten aplikasi.</p></div>
@@ -423,6 +472,7 @@
       const pages = {
         compose: ['Pesan Masal', 'Kirim pesan ke banyak nomor atau grup sekaligus.'],
         devices: ['Devices', 'Kelola device dan status koneksi WhatsApp.'],
+        inbox: ['Kotak Masuk', 'Lihat dan balas pesan WhatsApp dari web.'],
         schedules: ['Jadwal Pesan', 'Atur pengiriman pesan pada waktu tertentu.'],
         autoreply: ['Auto Reply', 'Buat balasan otomatis berdasarkan kata kunci.'],
         history: ['Riwayat Pesan', 'Pantau status antrean dan hasil pengiriman.'],
@@ -434,6 +484,10 @@
       let composeMode = 'send';
       let modalState = null;
       let modalPreviousFocus = null;
+      let inboxMessages = [];
+      let inboxOutgoingMessages = [];
+      let selectedConversationKey = null;
+      let selectedReplyMessageId = null;
       let selectedAttachments = [];
 
       const rememberedApiKey = localStorage.getItem('gateway-api-key');
@@ -607,6 +661,7 @@
         $('#pageTitle').textContent = pages[name][0];
         $('#pageSubtitle').textContent = pages[name][1];
         if (name === 'history') loadHistory();
+        if (name === 'inbox') loadInbox();
         if (name === 'schedules') loadSchedules();
         if (name === 'autoreply') loadRules();
         if (name === 'devices') loadDevices().catch((error) => notify(error.message, 'error'));
@@ -844,6 +899,7 @@
           if (!devicesLoaded || $('#view-devices').classList.contains('active')) await loadDevices();
           else await refreshStatus();
           if ($('#view-history').classList.contains('active')) await loadHistory();
+          if ($('#view-inbox').classList.contains('active')) await loadInbox();
           if ($('#view-schedules').classList.contains('active')) await loadSchedules();
           if ($('#view-autoreply').classList.contains('active')) await loadRules();
           if ($('#view-settings').classList.contains('active')) {
@@ -1002,6 +1058,119 @@
           }
         } catch (error) {
           if (apiKeyInput.value.trim()) setFeedback(authMessage, error.message, 'error');
+        }
+      }
+
+      function inboxKey(deviceId, remoteJid) {
+        return JSON.stringify([deviceId, remoteJid]);
+      }
+
+      function renderInbox() {
+        const latestByConversation = new Map();
+        for (const message of inboxMessages) {
+          const key = inboxKey(message.deviceId, message.remoteJid);
+          if (!latestByConversation.has(key)) latestByConversation.set(key, message);
+        }
+
+        const list = $('#inboxList');
+        list.replaceChildren();
+        if (!latestByConversation.size) {
+          const empty = document.createElement('p');
+          empty.className = 'empty';
+          empty.textContent = 'Belum ada pesan masuk.';
+          list.append(empty);
+        } else {
+          for (const [key, message] of latestByConversation) {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = `inbox-entry${key === selectedConversationKey ? ' active' : ''}`;
+            const sender = document.createElement('strong');
+            sender.textContent = message.senderName;
+            const preview = document.createElement('span');
+            preview.textContent = message.text;
+            const details = document.createElement('small');
+            details.textContent = `${devices.find((device) => device.id === message.deviceId)?.name ?? message.deviceId} · ${new Date(message.createdAt).toLocaleString()}`;
+            button.append(sender, preview, details);
+            button.addEventListener('click', () => {
+              selectedConversationKey = key;
+              renderInbox();
+            });
+            list.append(button);
+          }
+        }
+
+        renderInboxConversation();
+      }
+
+      function renderInboxConversation() {
+        const latest = inboxMessages.find((message) => (
+          inboxKey(message.deviceId, message.remoteJid) === selectedConversationKey
+        ));
+        const messagesNode = $('#inboxMessages');
+        messagesNode.replaceChildren();
+        if (!latest) {
+          selectedReplyMessageId = null;
+          $('#inboxContact').textContent = 'Pilih pesan masuk';
+          $('#inboxContactMeta').textContent = 'Balasan akan dikirim melalui device asal pesan.';
+          $('#inboxReplyForm').classList.add('hidden');
+          const empty = document.createElement('p');
+          empty.className = 'empty';
+          empty.textContent = 'Pilih kontak untuk melihat pesan.';
+          messagesNode.append(empty);
+          return;
+        }
+
+        $('#inboxContact').textContent = latest.senderName;
+        $('#inboxContactMeta').textContent = `${devices.find((device) => device.id === latest.deviceId)?.name ?? latest.deviceId} · ${latest.remoteJid}`;
+        selectedReplyMessageId = latest.id;
+        $('#inboxReplyForm').classList.remove('hidden');
+
+        const key = inboxKey(latest.deviceId, latest.remoteJid);
+        const conversation = [
+          ...inboxMessages
+            .filter((message) => inboxKey(message.deviceId, message.remoteJid) === key)
+            .map((message) => ({ direction: 'incoming', text: message.text, createdAt: message.createdAt })),
+          ...inboxOutgoingMessages
+            .filter((message) => message.deviceId === latest.deviceId && message.phone === latest.remoteJid)
+            .map((message) => ({
+              direction: 'outgoing',
+              text: message.preview,
+              status: message.status,
+              createdAt: message.createdAt,
+            })),
+        ].sort((left, right) => Date.parse(left.createdAt) - Date.parse(right.createdAt));
+
+        for (const message of conversation) {
+          const bubble = document.createElement('article');
+          bubble.className = `inbox-message ${message.direction}`;
+          const text = document.createElement('p');
+          text.textContent = message.text;
+          const meta = document.createElement('small');
+          meta.textContent = `${new Date(message.createdAt).toLocaleString()}${message.status ? ` · ${message.status}` : ''}`;
+          bubble.append(text, meta);
+          messagesNode.append(bubble);
+        }
+        messagesNode.scrollTop = messagesNode.scrollHeight;
+      }
+
+      async function loadInbox() {
+        try {
+          const [inboxResult, historyResult] = await Promise.all([
+            api('/api/inbox'),
+            api('/api/messages'),
+          ]);
+          inboxMessages = inboxResult.messages;
+          inboxOutgoingMessages = historyResult.messages;
+          const available = new Set(inboxMessages.map((message) => inboxKey(message.deviceId, message.remoteJid)));
+          if (!available.has(selectedConversationKey)) {
+            selectedConversationKey = inboxMessages.length
+              ? inboxKey(inboxMessages[0].deviceId, inboxMessages[0].remoteJid)
+              : null;
+          }
+          setFeedback($('#inboxFeedback'), '', '');
+          renderInbox();
+        } catch (error) {
+          setFeedback($('#inboxFeedback'), error.message, 'error');
         }
       }
 
@@ -1166,6 +1335,27 @@
         showView('compose');
       });
       $('#refreshHistory').addEventListener('click', loadHistory);
+      $('#refreshInbox').addEventListener('click', loadInbox);
+      $('#inboxReplyForm').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const reply = $('#inboxReplyText').value.trim();
+        const button = $('#inboxReplyButton');
+        if (!selectedReplyMessageId || !reply) return;
+        button.disabled = true;
+        try {
+          await api(`/api/inbox/${encodeURIComponent(selectedReplyMessageId)}/reply`, {
+            method: 'POST',
+            body: JSON.stringify({ message: reply }),
+          });
+          $('#inboxReplyText').value = '';
+          setFeedback($('#inboxReplyFeedback'), 'Balasan masuk antrean.', 'success');
+          await loadInbox();
+        } catch (error) {
+          setFeedback($('#inboxReplyFeedback'), error.message, 'error');
+        } finally {
+          button.disabled = false;
+        }
+      });
       $('#saveKey').addEventListener('click', () => {
         const key = apiKeyInput.value.trim();
         if (rememberApiKeyInput.checked) {

@@ -174,7 +174,7 @@ function getStatus(waManager, waClient, deviceId) {
   return waManager?.getStatus(deviceId) ?? waClient.getStatus();
 }
 
-export function createApiRouter({ apiKey, queue, waClient, waManager, scheduler, autoReply, aiReply, dataDir }) {
+export function createApiRouter({ apiKey, queue, waClient, waManager, scheduler, autoReply, aiReply, inbox, dataDir }) {
   const router = Router();
   router.use(authenticate(apiKey, waManager));
   router.use(restrictDeviceTokens);
@@ -454,6 +454,46 @@ export function createApiRouter({ apiKey, queue, waClient, waManager, scheduler,
     const removed = await scheduler.remove(request.params.id);
     if (!removed) return response.status(404).json({ error: 'Jadwal tidak ditemukan atau sudah diproses.' });
     return response.json({ message: 'Jadwal dibatalkan.' });
+  });
+
+  router.get('/inbox', (_request, response) => {
+    if (!inbox) return response.status(501).json({ error: 'Kotak masuk belum aktif.' });
+    response.set('Cache-Control', 'no-store');
+    return response.json({ messages: inbox.getMessages() });
+  });
+
+  router.post('/inbox/:messageId/reply', (request, response) => {
+    if (!inbox) return response.status(501).json({ error: 'Kotak masuk belum aktif.' });
+    const source = inbox.getMessage(request.params.messageId);
+    if (!source) return response.status(404).json({ error: 'Pesan masuk tidak ditemukan.' });
+    const message = typeof request.body?.message === 'string' ? request.body.message.trim() : '';
+    if (!message || message.length > 4000) {
+      return response.status(400).json({ error: 'Balasan wajib berisi 1 sampai 4000 karakter.' });
+    }
+
+    try {
+      const item = queue.enqueue({
+        deviceId: source.deviceId,
+        target: source.remoteJid,
+        message,
+      });
+      if (item.status !== 'queued') {
+        return response.status(429).json({
+          error: item.error,
+          id: item.id,
+          status: item.status,
+          dailyRemaining: item.dailyRemaining,
+        });
+      }
+      return response.status(202).json({
+        message: 'Balasan ditambahkan ke antrean.',
+        id: item.id,
+        status: item.status,
+        target: source.remoteJid,
+      });
+    } catch (error) {
+      return response.status(error.statusCode ?? 400).json({ error: error.message });
+    }
   });
 
   router.get('/auto-replies', (_request, response) => {

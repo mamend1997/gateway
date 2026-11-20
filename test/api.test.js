@@ -159,6 +159,76 @@ test('device token sends only through its owner device and cannot read admin end
   assert.equal((await token.json()).token, 'device-secret');
 });
 
+test('admin can read the inbox and reply only to a recorded incoming message', async (context) => {
+  const queued = [];
+  const source = {
+    id: 'incoming-1',
+    deviceId: 'device-1',
+    remoteJid: '6281234567890@s.whatsapp.net',
+  };
+  const inbox = {
+    getMessages: () => [{ ...source, senderName: 'Rina', text: 'Halo' }],
+    getMessage: (id) => id === source.id ? source : null,
+  };
+  const queue = {
+    enqueue(message) {
+      const item = { id: 'reply-1', status: 'queued', ...message };
+      queued.push(item);
+      return item;
+    },
+    getMessages: () => [],
+  };
+  const waManager = {
+    getDeviceIdForToken: (token) => token === 'device-secret' ? 'device-1' : null,
+  };
+  const app = express();
+  app.use(express.json());
+  app.use('/api', createApiRouter({
+    apiKey: 'admin-secret',
+    queue,
+    waClient: { getStatus: () => ({ status: 'open', connected: true }) },
+    waManager,
+    inbox,
+  }));
+  const server = app.listen(0, '127.0.0.1');
+  context.after(() => new Promise((resolve) => server.close(resolve)));
+  await new Promise((resolve) => server.once('listening', resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}/api`;
+
+  const messages = await fetch(`${baseUrl}/inbox`, {
+    headers: { 'X-API-Key': 'admin-secret' },
+  });
+  assert.equal((await messages.json()).messages[0].senderName, 'Rina');
+
+  const reply = await fetch(`${baseUrl}/inbox/incoming-1/reply`, {
+    method: 'POST',
+    headers: {
+      'X-API-Key': 'admin-secret',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ message: 'Baik, saya bantu.', target: 'attacker-target', deviceId: 'other-device' }),
+  });
+  assert.equal(reply.status, 202);
+  assert.equal(queued[0].deviceId, 'device-1');
+  assert.equal(queued[0].target, '6281234567890@s.whatsapp.net');
+  assert.equal(queued[0].message, 'Baik, saya bantu.');
+
+  const missing = await fetch(`${baseUrl}/inbox/unknown/reply`, {
+    method: 'POST',
+    headers: {
+      'X-API-Key': 'admin-secret',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ message: 'Balasan' }),
+  });
+  assert.equal(missing.status, 404);
+
+  const deviceToken = await fetch(`${baseUrl}/inbox`, {
+    headers: { 'X-API-Key': 'device-secret' },
+  });
+  assert.equal(deviceToken.status, 403);
+});
+
 test('admin can save and reset a persisted dashboard favicon', async (context) => {
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'gateway-favicon-'));
   const app = express();

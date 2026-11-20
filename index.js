@@ -10,6 +10,7 @@ import { WhatsAppManager } from './services/waManager.js';
 import { MessageScheduler } from './services/scheduler.js';
 import { AutoReplyService } from './services/autoReply.js';
 import { GeminiAutoReplyService } from './services/aiAutoReply.js';
+import { InboxStore } from './services/inboxStore.js';
 import { readJson } from './services/jsonStore.js';
 
 const currentDir = path.dirname(fileURLToPath(import.meta.url));
@@ -88,6 +89,7 @@ const queue = new QueueManager({
   batchCooldownMaxMs,
 });
 const scheduler = new MessageScheduler({ dataDir, queueManager: queue });
+const inbox = new InboxStore({ dataDir, waManager });
 const autoReply = new AutoReplyService({
   dataDir,
   waManager,
@@ -104,7 +106,7 @@ const aiReply = new GeminiAutoReplyService({
   autoReply,
 });
 
-app.use('/api', createApiRouter({ apiKey, queue, waManager, scheduler, autoReply, aiReply, dataDir }));
+app.use('/api', createApiRouter({ apiKey, queue, waManager, scheduler, autoReply, aiReply, inbox, dataDir }));
 app.get('/', (_request, response) => {
   response.sendFile(path.join(currentDir, 'public', 'index.html'));
 });
@@ -125,6 +127,7 @@ const server = app.listen(port, '0.0.0.0', () => {
   console.log(`WhatsApp Gateway berjalan di http://0.0.0.0:${port}`);
   void (async () => {
     await autoReply.start();
+    await inbox.start();
     await waManager.start();
     await scheduler.start();
   })().catch((error) => {
@@ -142,6 +145,7 @@ async function shutdown(signal) {
   await queue.stop();
   await new Promise((resolve) => server.close(resolve));
   await waManager.stop();
+  await inbox.stop();
   process.exit(0);
 }
 
