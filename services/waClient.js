@@ -29,6 +29,7 @@ export class WhatsAppClient extends EventEmitter {
     this.inactiveTargets = new Map();
     this.verifiedTargets = new Map();
     this.pendingCredsSave = Promise.resolve();
+    this.saveCreds = null;
     this.logger = pino({ level: process.env.LOG_LEVEL ?? 'warn' });
   }
 
@@ -69,6 +70,7 @@ export class WhatsAppClient extends EventEmitter {
     this.emit('status', this.getStatus());
 
     const { state, saveCreds } = await useMultiFileAuthState(this.authDir);
+    this.saveCreds = saveCreds;
     const socket = makeWASocket({
       auth: state,
       logger: this.logger,
@@ -77,11 +79,7 @@ export class WhatsAppClient extends EventEmitter {
     });
     this.socket = socket;
     socket.ev.on('creds.update', () => {
-      this.pendingCredsSave = this.pendingCredsSave
-        .then(() => saveCreds())
-        .catch((error) => {
-          this.logger.error({ err: error }, `Gagal menyimpan kredensial WhatsApp device ${this.id}.`);
-        });
+      if (this.socket === socket) this.persistCredentials(saveCreds);
     });
     socket.ev.on('contacts.upsert', (contacts) => {
       for (const contact of contacts) {
@@ -129,6 +127,15 @@ export class WhatsAppClient extends EventEmitter {
         this.lastError = null;
         this.wasConnected = true;
         this.emit('status', this.getStatus());
+        await this.persistCredentials(saveCreds);
+        try {
+          await fs.access(path.join(this.authDir, 'creds.json'));
+          console.log(`WhatsApp device ${this.id}: kredensial sesi tersimpan di ${this.authDir}.`);
+        } catch (error) {
+          this.lastError = `Gagal memverifikasi penyimpanan sesi WhatsApp: ${error.message}`;
+          this.logger.error({ err: error }, `Kredensial WhatsApp device ${this.id} tidak ditemukan setelah koneksi terbuka.`);
+          this.emit('status', this.getStatus());
+        }
         await this.sendPendingDisconnectNotice();
       } else if (update.connection === 'close') {
         const statusCode = update.lastDisconnect?.error?.output?.statusCode;
@@ -166,6 +173,18 @@ export class WhatsAppClient extends EventEmitter {
         this.scheduleReconnect();
       });
     }, 2000);
+  }
+
+  persistCredentials(saveCreds = this.saveCreds) {
+    if (!saveCreds) return this.pendingCredsSave;
+    this.pendingCredsSave = this.pendingCredsSave
+      .then(() => saveCreds())
+      .catch((error) => {
+        this.lastError = `Gagal menyimpan sesi WhatsApp: ${error.message}`;
+        this.logger.error({ err: error }, `Gagal menyimpan kredensial WhatsApp device ${this.id}.`);
+        this.emit('status', this.getStatus());
+      });
+    return this.pendingCredsSave;
   }
 
   async sendText(phone, message) {
@@ -305,8 +324,10 @@ export class WhatsAppClient extends EventEmitter {
     this.reconnectTimer = null;
     const socket = this.socket;
     this.socket = null;
+    if (this.wasConnected) await this.persistCredentials();
     socket?.end(undefined);
     await this.pendingCredsSave;
+    this.saveCreds = null;
     this.status = 'close';
     this.statusUpdatedAt = new Date().toISOString();
     this.qr = null;

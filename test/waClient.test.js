@@ -105,3 +105,21 @@ test('waits for pending credential writes before stopping the socket', async () 
 
   assert.equal(credentialsSaved, true);
 });
+
+test('persists authenticated credentials before stopping the socket', async () => {
+  const client = new WhatsAppClient({
+    id: 'device-1',
+    name: 'Test',
+    authDir: '.',
+  });
+  let credentialsSaved = false;
+  client.wasConnected = true;
+  client.saveCreds = async () => {
+    credentialsSaved = true;
+  };
+  client.socket = { end() {} };
+
+  await client.stop();
+
+  assert.equal(credentialsSaved, true);
+});

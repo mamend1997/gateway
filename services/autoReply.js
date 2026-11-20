@@ -1,9 +1,10 @@
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { normalizeMessageContent } from '@whiskeysockets/baileys';
 import { readJson, writeJson } from './jsonStore.js';
 
 export function getMessageText(message) {
-  const content = message.message ?? {};
+  const content = normalizeMessageContent(message.message) ?? {};
   return content.conversation
     ?? content.extendedTextMessage?.text
     ?? content.imageMessage?.caption

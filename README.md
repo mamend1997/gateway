@@ -195,8 +195,8 @@ Jangan pernah menjalankan `git add -f` untuk `.env` atau direktori autentikasi.
 
 1. Push repository ke GitHub dan buat project Railway dari repository tersebut. Build/start menggunakan `npm install` dan script `npm start`.
 2. Pada **Variables**, atur `API_KEY` (nilai rahasia sendiri), `AUTH_DIR=/app/auth_info`, `DATA_DIR=/app/data`, `ADMIN_PHONE` bila perlu, dan `CORS_ORIGIN` ke origin frontend. Untuk AI, set `AI_AUTO_REPLY=true` dan `GEMINI_API_KEY` dari Google AI Studio. Railway mengatur `PORT` secara otomatis.
-3. Pasang volume persisten pada `/app/auth_info` dan satu lagi pada `/app/data`, sama dengan `AUTH_DIR` dan `DATA_DIR`. Volume pertama menjaga sesi WhatsApp; volume kedua menjaga daftar device, token per-device, jadwal, auto-reply, dan riwayat lintas restart/redeploy.
-4. Deploy. Buka URL publik service untuk dashboard, masukkan API key, lalu scan QR. Gunakan endpoint `https://<nama-proyek>.up.railway.app/api/send-message` dari aplikasi web eksternal dengan header API key.
+3. Pasang volume persisten pada `/app/auth_info` dan satu lagi pada `/app/data`, sama dengan `AUTH_DIR` dan `DATA_DIR`. Pasang volume sebelum scan QR pertama; volume yang dipasang belakangan tidak berisi sesi lama. Volume pertama menjaga sesi WhatsApp; volume kedua menjaga daftar device, token per-device, jadwal, auto-reply, dan riwayat lintas restart/redeploy.
+4. Deploy. Buka URL publik service untuk dashboard, masukkan API key, lalu scan QR. Log harus mengonfirmasi sesi tersimpan di `/app/auth_info`, dan pada startup redeploy berikutnya menampilkan `creds.json=ada`. Jika tidak, periksa mount path volume dan nilai `AUTH_DIR`. Gunakan endpoint `https://<nama-proyek>.up.railway.app/api/send-message` dari aplikasi web eksternal dengan header API key.
 
 Pada Railway, notifikasi admin tidak dapat dikirim ketika koneksi sedang putus; jika `ADMIN_PHONE` diisi, gateway mencoba mengirim pemberitahuan setelah koneksi tersambung kembali.
 

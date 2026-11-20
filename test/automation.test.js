@@ -24,7 +24,11 @@ test('auto-reply queues one matching rule once per incoming message', async () =
     await service.add({ deviceId: 'primary', keyword: 'Harga', reply: 'Silakan cek katalog.' });
     const incoming = {
       key: { id: 'message-1', remoteJid: '6281234567890@s.whatsapp.net' },
-      message: { conversation: 'Info HARGA dong' },
+      message: {
+        ephemeralMessage: {
+          message: { conversation: 'Info HARGA dong' },
+        },
+      },
     };
 
     await service.handleMessage('primary', incoming);
