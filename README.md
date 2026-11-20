@@ -22,7 +22,7 @@ Isi `API_KEY` di `.env` dengan token acak yang panjang. Jangan gunakan nilai con
 npm start
 ```
 
-Untuk mode pengembangan dengan restart otomatis: `npm run dev`. Buka `http://localhost:3000`, masukkan API key, lalu scan QR dari menu **Perangkat tertaut** di WhatsApp.
+Untuk mode pengembangan dengan restart otomatis: `npm run dev`. Buka `http://localhost:3000`, masukkan API key, lalu scan QR dari menu **Perangkat tertaut** di WhatsApp. API key dashboard secara default hanya disimpan selama tab terbuka. Agar tidak perlu memasukkannya lagi, pilih **Ingat API key di perangkat ini** sebelum menekan **Simpan**. Ini menyimpan key di penyimpanan browser pada perangkat tersebut; gunakan hanya pada perangkat pribadi. Tombol **Keluar** menghapus key tersimpan.
 
 Dependensi dan skrip sudah dicantumkan di `package.json`; setelah menyalin proyek, `npm install` saja sudah cukup. Jangan jalankan `npm init -y` pada proyek ini karena perintah itu hanya untuk inisialisasi folder kosong.
 

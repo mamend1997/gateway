@@ -116,6 +116,8 @@
       .device-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
       .api-row { display: flex; gap: 9px; }
       .api-row input { flex: 1; }
+      .remember-key { display: flex; align-items: center; gap: 8px; margin: 12px 0 0; font-weight: 500; }
+      .remember-key input { width: 16px; height: 16px; margin: 0; accent-color: #15976f; }
       .hidden { display: none !important; }
       .toast-region { position: fixed; top: 18px; right: 18px; z-index: 20; display: grid; width: min(390px, calc(100vw - 36px)); gap: 9px; }
       .toast { padding: 13px 15px; border: 1px solid #cbd5e1; border-radius: 12px; color: #23344b; background: white; box-shadow: 0 12px 30px #17233826; font-size: .88rem; }
@@ -378,7 +380,9 @@
             <h2>Akses dashboard</h2>
             <label for="apiKey">API key Railway</label>
             <div class="api-row"><input id="apiKey" type="password" autocomplete="off" placeholder="Masukkan API_KEY"><button id="saveKey" class="button" type="button">Simpan</button></div>
-            <p id="authMessage" class="feedback" role="status">API key hanya disimpan pada sesi browser ini.</p>
+            <label class="remember-key"><input id="rememberApiKey" type="checkbox"> Ingat API key di perangkat ini</label>
+            <p id="authMessage" class="feedback" role="status">Secara default API key hanya disimpan sampai tab ditutup.</p>
+            <p class="help">Penyimpanan di perangkat ini memudahkan akses berikutnya, tetapi orang lain yang memakai browser/perangkat ini juga dapat mengakses dashboard.</p>
           </section>
           <section class="card">
             <h2>Logo &amp; favicon</h2>
@@ -413,6 +417,7 @@
     <script>
       const $ = (selector) => document.querySelector(selector);
       const apiKeyInput = $('#apiKey');
+      const rememberApiKeyInput = $('#rememberApiKey');
       const authMessage = $('#authMessage');
       const defaultFaviconUrl = $('#appFavicon').href;
       const pages = {
@@ -430,7 +435,12 @@
       let modalState = null;
       let modalPreviousFocus = null;
 
-      apiKeyInput.value = sessionStorage.getItem('gateway-api-key') ?? '';
+      const rememberedApiKey = localStorage.getItem('gateway-api-key');
+      apiKeyInput.value = rememberedApiKey ?? sessionStorage.getItem('gateway-api-key') ?? '';
+      rememberApiKeyInput.checked = rememberedApiKey !== null;
+      if (rememberApiKeyInput.checked) {
+        authMessage.textContent = 'API key tersimpan di perangkat ini.';
+      }
 
       function setFeedback(node, text, kind = '') {
         node.textContent = text;
@@ -1131,8 +1141,16 @@
       });
       $('#refreshHistory').addEventListener('click', loadHistory);
       $('#saveKey').addEventListener('click', () => {
-        sessionStorage.setItem('gateway-api-key', apiKeyInput.value.trim());
-        setFeedback(authMessage, 'API key disimpan sampai tab browser ditutup.', 'success');
+        const key = apiKeyInput.value.trim();
+        if (rememberApiKeyInput.checked) {
+          localStorage.setItem('gateway-api-key', key);
+          sessionStorage.removeItem('gateway-api-key');
+          setFeedback(authMessage, 'API key disimpan di perangkat ini.', 'success');
+        } else {
+          sessionStorage.setItem('gateway-api-key', key);
+          localStorage.removeItem('gateway-api-key');
+          setFeedback(authMessage, 'API key disimpan sampai tab browser ditutup.', 'success');
+        }
         refreshAll();
       });
       $('#saveFavicon').addEventListener('click', saveFavicon);
@@ -1165,7 +1183,9 @@
       });
       $('#logoutButton').addEventListener('click', () => {
         sessionStorage.removeItem('gateway-api-key');
+        localStorage.removeItem('gateway-api-key');
         apiKeyInput.value = '';
+        rememberApiKeyInput.checked = false;
         $('#headerStatus').textContent = 'API key dibutuhkan';
         $('#headerStatus').className = 'connection-pill close';
         showView('settings');
